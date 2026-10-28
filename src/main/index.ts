@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog } from 'el
 import { join, resolve } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
 import { Backend } from './backend';
-import { Controller, Intent } from './controller';
+import { Controller, Intent, modelLabel, effortLabel } from './controller';
 import { displaySvg, rgb565 } from './display';
 import { XpadDevice } from './device/hid';
 import { XpadProtocol } from './device/protocol';
@@ -41,10 +41,11 @@ async function run() {
   try{c.loadPreferences(JSON.parse(readFileSync(preferenceFile,'utf8')));}catch{}
   let mascots:MascotPlayer|null=null;
   try{mascots=await MascotPlayer.load(root);}catch(e){console.error('[mascot]',e);c.notice='Mascot artwork unavailable. Reinstall the app to restore it.';}
-  if (demo) c.update({connected: false, error:'Demo — no real agent controls', rows: [
-    {id:'demo1', session_id:'demo1', label:'API service', state:'waiting', reason:'Approval needed', detail:'Run unit tests?', project:'C:\\dev\\example', actions:[], control_token:'-', review:'Command:\nnpm test\nDirectory:\nC:\\dev\\example', control_hint:'Demo'},
-    {id:'demo2', session_id:'demo2', label:'Unit tests', state:'running', reason:'Working', detail:'', project:'C:\\dev\\example', actions:[], control_token:'-', review:'', control_hint:'Demo'},
-    {id:'demo3', session_id:'demo3', label:'Documentation', state:'idle', reason:'Turn stopped', detail:'', project:'C:\\dev\\example', actions:[], control_token:'-', review:'', control_hint:'Demo'},
+  if (demo) c.update({connected: false, error:'Demo — no real agent controls',
+    models:[{id:'gpt-6.1-sol',label:'GPT-6.1-Sol',efforts:['low','medium','high','xhigh','max','ultra'],defaultEffort:'low'},{id:'gpt-6-luna',label:'GPT-6-Luna',efforts:['low','medium','high','xhigh','max'],defaultEffort:'medium'}],models_token:'demo-catalog',rows: [
+    {id:'demo1', session_id:'demo1', label:'API service', state:'waiting', reason:'Approval needed', detail:'Run unit tests?', project:'C:\\dev\\example', actions:[], control_token:'-', review:'Command:\nnpm test\nDirectory:\nC:\\dev\\example', control_hint:'Demo',settings:{model:'gpt-6.1-sol',effort:'high',approvalPolicy:'on-request',sandboxPolicy:{type:'workspaceWrite'}},settings_token:'demo-settings-1'},
+    {id:'demo2', session_id:'demo2', label:'Unit tests', state:'running', reason:'Working', detail:'', project:'C:\\dev\\example', actions:[], control_token:'-', review:'', control_hint:'Demo',settings:{model:'gpt-6-luna',effort:'medium',approvalPolicy:'on-request',sandboxPolicy:{type:'workspaceWrite'}},settings_token:'demo-settings-2'},
+    {id:'demo3', session_id:'demo3', label:'Documentation', state:'idle', reason:'Turn stopped', detail:'', project:'C:\\dev\\example', actions:[], control_token:'-', review:'', control_hint:'Demo',settings:{model:'gpt-6.1-sol',effort:'medium',approvalPolicy:'on-request',sandboxPolicy:{type:'workspaceWrite'}},settings_token:'demo-settings-3'},
   ]});
 
   function visual() {
@@ -55,12 +56,12 @@ async function run() {
   function view() { return {snapshot:c.snapshot, selected:c.selected, page:c.page, cursor:c.cursor,
     menu:c.menu, review:c.row, confirmation:c.confirm, busy:c.busy, notice:c.notice, preferences:c.preferences, canApprove:c.canApprove,
     device:{connected:device.connected, ready:protocol.ready && keysReady && !remapping, keysReady, error:deviceError},
-    inputMode:'Direct USB', demo, ...visual()}; }
+    inputMode:'Direct USB', demo, modelLabel:modelLabel(c.row,c.snapshot),effortLabel:effortLabel(c.row?.settings?.effort),canChooseModel:c.canChooseModel,canChooseEffort:c.canChooseEffort,...visual()}; }
   function publish() { if (win && !win.isDestroyed()) win.webContents.send('view', view()); }
   async function execute(intent?: Intent) {
     if (!intent || c.busy || !backend) return;
     c.busy = true; publish();
-    try { c.update(await backend.request(intent.method, intent.params)); c.notice = 'Action confirmed'; }
+    try { c.update(await backend.request(intent.method, intent.params)); c.notice = intent.method==='configuration'?'Settings updated · next turn':'Action confirmed'; }
     catch (e) { c.notice = String((e as Error).message); }
     finally { c.busy = false; publish(); }
   }
@@ -117,6 +118,7 @@ async function run() {
     finally{c.busy=false;publish();}
   });
   ipcMain.handle('action', (_e,verb) => {
+    if(verb==='model'||verb==='effort'){c.openConfiguration(verb);publish();return;}
     if (verb === 'review') { if (c.row?.review && !c.busy) { c.page='details';c.cursor=0; } publish(); return; }
     if (verb === 'settings') { if (c.row?.settings && !c.busy) { c.page='settings'; c.cursor=0; } publish(); return; }
     if (verb === 'approve' || verb === 'reject') {

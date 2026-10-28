@@ -22,6 +22,21 @@ The mascot sits beside the activity preview. Press the knob for full details;
 choose Off for the wider text preview. Colors and approval controls still show
 the actual agent state independently of the animation.
 
+### Model and Effort
+
+The pad's top line shows the selected agent's **Model · Effort**. Both values
+also appear beneath the agent's name in the PC app.
+
+To change either on the pad: **press the knob → Model or Effort → turn to
+choose → press to review → press again to apply**. Use × to cancel. The PC
+app's Model/Effort buttons open the same selectors in the live pad preview.
+
+Choices come from Codex's model catalog, including each model's supported
+Effort values. A model change preserves Effort when supported; otherwise the
+confirmation shows the new model's default. Changes apply to subsequent turns
+on that agent. Permission settings are preserved. If settings or model choices
+change while a selection is being reviewed, reopen the selector to review it again.
+
 ![Desktop companion showing simulated Codex sessions](docs/images/dashboard.png)
 
 *Demo screenshot with synthetic sessions. The physical LCD uses the same layout.*

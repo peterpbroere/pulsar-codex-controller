@@ -1,8 +1,17 @@
 import { Row, Snapshot } from '../shared/types';
 import { isMascotChoice, MascotChoice } from './mascot';
 export const MODES = ['Read-only', 'Auto', 'No prompts', 'YOLO / Full access'];
-export type Page = 'agent' | 'details' | 'settings' | 'confirm' | 'global';
+export type Page = 'agent' | 'details' | 'settings' | 'model' | 'effort' | 'confirm' | 'global';
 export interface Intent { method: string; params: Record<string, any> }
+export function effortLabel(value:unknown):string {
+  if(value===null)return 'Default';
+  if(typeof value!=='string'||!value)return 'Unknown';
+  return value==='xhigh'?'XHigh':value[0].toUpperCase()+value.slice(1);
+}
+export function modelLabel(row:Row|undefined,snapshot:Snapshot):string {
+  const model=row?.settings?.model;
+  return snapshot.models?.find(m=>m.id===model)?.label||model||'Model unknown';
+}
 export function modeLabel(settings?: Record<string, any>): string {
   if (!settings) return 'Unknown';
   const sandbox = settings.sandboxPolicy?.type, policy = settings.approvalPolicy;
@@ -15,7 +24,7 @@ export function modeLabel(settings?: Record<string, any>): string {
 export class Controller {
   snapshot: Snapshot = {rows: [], connected: false, error: ''};
   selected = ''; page: Page = 'agent'; cursor = 0; scroll = 0; notice = ''; busy = false;
-  confirm: {row: Row; mode: string} | null = null;
+  confirm: ({kind:'permission';row:Row;mode:string}|{kind:'model'|'effort';row:Row;model:string;effort:string|null;label:string;catalogToken:string}) | null = null;
   displayedApproval: {id: string; session: string; token: string} | null = null;
   preferences = {brightness: 85, lights: true, mascot:'cat' as MascotChoice};
   loadPreferences(value:unknown) {
@@ -39,7 +48,22 @@ export class Controller {
   }
   get row() { return this.snapshot.rows.find(r => r.id === this.selected); }
   get attention() { return this.snapshot.rows.filter(r => r.state === 'waiting' || r.state === 'error'); }
+  get modelChoices() { return this.snapshot.models??[]; }
+  get effortChoices() { return this.modelChoices.find(m=>m.id===this.row?.settings?.model)?.efforts??[]; }
+  get canChooseModel() { return !!this.row?.settings_token&&!!this.snapshot.models_token&&this.modelChoices.length>0; }
+  get canChooseEffort() { return this.canChooseModel&&this.effortChoices.length>0; }
+  get pickerLabels() {
+    return [...(this.page==='model'?this.modelChoices.map(m=>m.label+(m.id===this.row?.settings?.model?' · current':'')):
+      this.effortChoices.map(e=>effortLabel(e)+(e===this.row?.settings?.effort?' · current':''))),'Back'];
+  }
+  openConfiguration(kind:'model'|'effort') {
+    if(this.busy)return;
+    if(!(kind==='model'?this.canChooseModel:this.canChooseEffort)){this.notice=this.snapshot.models_error||'Choices unavailable for this agent';return;}
+    this.page=kind;this.displayedApproval=null;
+    this.cursor=Math.max(0,kind==='model'?this.modelChoices.findIndex(m=>m.id===this.row?.settings?.model):this.effortChoices.indexOf(this.row?.settings?.effort));
+  }
   get menu() { return ['Activity / request', ...(this.row?.settings ? ['Permission mode'] : []),
+    ...(this.canChooseModel?['Model']:[]),...(this.canChooseEffort?['Effort']:[]),
     ...(this.row?.actions.includes('reject') ? ['Reject request'] : []),
     ...(this.row?.actions.includes('stop') ? ['Stop turn'] : []),
     ...(this.row?.actions.includes('continue') ? ['Continue'] : []), 'Global settings', 'Back']; }
@@ -86,6 +110,7 @@ export class Controller {
       this.select(rows[(index + delta + rows.length) % rows.length].id);
     } else if (this.page === 'details') this.cursor = (this.cursor + delta + this.menu.length) % this.menu.length;
     else if (this.page === 'settings') this.cursor = (this.cursor + delta + MODES.length + 1) % (MODES.length + 1);
+    else if (this.page === 'model'||this.page==='effort') this.cursor=(this.cursor+delta+this.pickerLabels.length)%this.pickerLabels.length;
     else if (this.page === 'global') this.cursor = (this.cursor + delta + this.globalMenu.length) % this.globalMenu.length;
   }
   press(): Intent | undefined {
@@ -97,14 +122,26 @@ export class Controller {
       if (entry === 'Activity / request') { this.scroll += 3; }
       else if (entry === 'Global settings') this.toggleGlobal();
       else if (entry === 'Permission mode') { this.page = 'settings'; this.cursor = Math.max(0,MODES.indexOf(modeLabel(this.row?.settings))); }
+      else if(entry==='Model')this.openConfiguration('model');
+      else if(entry==='Effort')this.openConfiguration('effort');
       else if (entry === 'Stop turn' || entry === 'Continue' || entry === 'Reject request') { this.back(); return this.action(entry === 'Stop turn' ? 'stop' : entry === 'Continue' ? 'continue' : 'reject'); }
       else if (entry === 'Back') this.back();
     } else if (this.page === 'settings') {
       if (this.cursor === MODES.length) this.back();
-      else if (this.row) { this.confirm = {row: structuredClone(this.row), mode: MODES[this.cursor]}; this.page = 'confirm'; }
+      else if (this.row) { this.confirm = {kind:'permission',row: structuredClone(this.row), mode: MODES[this.cursor]}; this.page = 'confirm'; }
+    } else if(this.page==='model'||this.page==='effort'){
+      const kind=this.page;
+      if(this.cursor===this.pickerLabels.length-1){this.back();return;}
+      const target=kind==='model'?this.modelChoices[this.cursor]:this.modelChoices.find(m=>m.id===this.row?.settings?.model);
+      if(!this.row||!target||!this.snapshot.models_token){this.notice='Choices changed. Reopen the selector.';this.back();return;}
+      const currentEffort=this.row.settings?.effort;
+      const effort=kind==='effort'?target.efforts[this.cursor]:target.efforts.includes(currentEffort)?currentEffort:target.defaultEffort;
+      if(effort===undefined){this.back();this.notice='Effort choices changed. Reopen the selector.';return;}
+      this.confirm={kind,row:structuredClone(this.row),model:target.id,effort,label:target.label,catalogToken:this.snapshot.models_token};this.page='confirm';
     } else if (this.page === 'confirm') {
       const confirmation = this.confirm; this.back();
-      if (confirmation) return {method:'settings', params:{id:confirmation.row.id, session_id:confirmation.row.session_id, mode:confirmation.mode, token:confirmation.row.settings_token}};
+      if(confirmation?.kind==='permission')return {method:'settings', params:{id:confirmation.row.id, session_id:confirmation.row.session_id, mode:confirmation.mode, token:confirmation.row.settings_token}};
+      if(confirmation)return {method:'configuration',params:{id:confirmation.row.id,session_id:confirmation.row.session_id,kind:confirmation.kind,model:confirmation.model,effort:confirmation.effort,token:confirmation.row.settings_token,catalog_token:confirmation.catalogToken}};
     } else if (this.page === 'global') {
       if (this.cursor === 0) this.preferences.brightness = this.preferences.brightness >= 100 ? 25 : Math.min(100,this.preferences.brightness+15);
       if (this.cursor === 1) this.preferences.lights = !this.preferences.lights;

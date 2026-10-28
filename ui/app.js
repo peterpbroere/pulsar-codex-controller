@@ -22,11 +22,14 @@ function render(v){
  if(!v.snapshot.rows.length){const p=document.createElement('p');p.className='empty';p.textContent='Your participating Codex sessions appear here after their first prompt. Use Connect Codex to set up session discovery.';list.append(p);}
  const r=v.snapshot.rows.find(r=>r.id===v.selected);
  $('name').textContent=r?.label||'No sessions yet';$('project').textContent=r?.project||'';$('reason').textContent=r?.reason||'';
+ $('model-effort').textContent=r?`Model: ${v.modelLabel} · Effort: ${v.effortLabel}`:'';
  const actions=$('actions');actions.replaceChildren();
  for(const [verb,label] of [['focus','Open on PC'],['stop','Stop turn'],['continue','Continue']]) if(r?.actions.includes(verb)) actions.append(button(label,verb,!v.busy));
  if(r?.review)actions.append(button('Review request','review',!v.busy));
  if(r?.settings)actions.append(button('Permission mode','settings',!v.busy));
- const settings=r?.settings;$('settings').textContent=settings?`Model: ${settings.model}\nApproval: ${typeof settings.approvalPolicy==='string'?settings.approvalPolicy:JSON.stringify(settings.approvalPolicy)} · Sandbox: ${settings.sandboxPolicy?.type}\nChanges apply to subsequent turns.`:r?.settings_error||r?.control_hint||'';
+ if(v.canChooseModel)actions.append(button('Model','model',!v.busy));
+ if(v.canChooseEffort)actions.append(button('Effort','effort',!v.busy));
+ const settings=r?.settings;$('settings').textContent=settings?`Approval: ${typeof settings.approvalPolicy==='string'?settings.approvalPolicy:JSON.stringify(settings.approvalPolicy)} · Sandbox: ${settings.sandboxPolicy?.type}\nChanges apply to subsequent turns.`:r?.settings_error||r?.control_hint||'';
  $('review-panel').hidden=v.page!=='details'||!v.review?.review;$('review').textContent=v.review?.review||'';
  $('approve').disabled=v.busy||!v.canApprove;$('reject').disabled=v.busy||!v.review?.actions.includes('reject');
  document.querySelectorAll('[data-key]').forEach(b=>{const key=Number(b.dataset.key);b.disabled=v.busy||(key===0&&!v.canApprove)||(key===1&&!r?.actions.includes('focus'))||(key===2&&!v.snapshot.rows.some(r=>r.state==='waiting'||r.state==='error'));});
