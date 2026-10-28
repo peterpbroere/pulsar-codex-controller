@@ -211,8 +211,9 @@ export class XpadProtocol {
   }
 
   /** KeyInfo indices 13/14/15 are knob press/clockwise/counterclockwise. */
-  async remapKnob(): Promise<void> {
-    for (const [index, usage] of [[13, 0x6d], [14, 0x6c], [15, 0x6b]]) {
+  async remapKnob(suppressKeyboard = false): Promise<void> {
+    for (const [index, shortcut] of [[13, 0x6d], [14, 0x6c], [15, 0x6b]]) {
+      const usage = suppressKeyboard ? 0 : shortcut;
       const entry = await this.readKeyInfo(index);
       if (!entry || (entry.readUInt32LE(0) & 0xff) !== 1) throw new Error(`Knob entry ${index} is unavailable`);
       if (!this.originalKeys.has(index)) this.originalKeys.set(index, Buffer.from(entry));
@@ -224,7 +225,7 @@ export class XpadProtocol {
       await new Promise(resolve=>setTimeout(resolve,35));
       const check=await this.readKeyInfo(index);
       if (!check?.equals(mapped)) throw new Error(`Knob mapping ${index} readback failed`);
-      console.log(`[protocol] knob ${index} mapped to F${usage-0x68+13}`);
+      console.log(`[protocol] knob ${index}: ${suppressKeyboard?'keyboard output suppressed':`F${usage-0x68+13}`}`);
     }
   }
 

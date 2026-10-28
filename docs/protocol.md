@@ -125,9 +125,24 @@ observations were verified on the device while developing this Codex controller:
 - Knob mappings are KeyInfo indices 13 (press), 14 (clockwise), 15 (counterclockwise).
   Preserve the encoder class flags and physical metadata. Keyboard output type is
   u32 zero at offset 16, with modifier/usage at offsets 20/21.
+- Usage page 0xFF11 sends unsolicited 0x21 reports: command 0xFF, index 0,
+  with checksummed type/index byte pairs. Type 0x10 is physical press; 0x11 is
+  release. Physical indices 0/1/2 are the main keys and 13 is knob press.
+  Keyboard-output pairs (types 0x14/0x15) must not trigger controller actions.
+- A completed clockwise encoder detent reports payload `11 0e 11 0e`;
+  counterclockwise reports `11 0f 11 0f`. Single `11 0e` / `11 0f` releases
+  are encoder contact transitions, not complete turns. Decode the repeated
+  pair within one validated report; do not debounce distinct encoder detents.
+  Observed during physical testing on 2026-10-28, including with keyboard output
+  suppressed and Rivals focused. This event stream avoids polling gaps during
+  display transfers and does not depend on global keyboard shortcuts.
+- In direct-input mode the main keys and knob have keyboard usage/modifiers
+  cleared in RAM. Preserve their physical metadata and encoder flags; restore
+  the saved entries on Quit. USB press/turn events still arrive with no keyboard
+  output configured.
 - Read KeyStatus (0x1E, empty payload): a four-byte active-low button mask.
   The released baseline was 0x3ffff. A physical + hold cleared bit 16 (0x2ffff),
-  and a physical × hold cleared bit 17 (0x1ffff). Edge detection maps these to
+  and a physical Ã— hold cleared bit 17 (0x1ffff). Edge detection maps these to
   global settings and Back, independently of firmware profile changes.
 - Merely simulating a SystemInfo profile change did not validate a physical +
   press during streaming. The current app uses raw KeyStatus rather than that proxy.

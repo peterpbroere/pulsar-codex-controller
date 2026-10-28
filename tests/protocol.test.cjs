@@ -14,3 +14,14 @@ test('raw-button reader ignores unrelated and corrupt packets before the valid r
  });};
  assert.equal(await p.readButtonState(),0x2ffff);assert.equal(d.bulk.listenerCount('data'),0);
 });
+
+test('direct input suppresses keyboard output while preserving and restoring encoder flags',async()=>{
+ const d=new EventEmitter(),writes=[],entries=new Map();d.bulk={write:b=>{writes.push(b);entries.set(b[7],Buffer.from(b.subarray(8,64)));}};
+ for(const index of [13,14,15]){const entry=Buffer.alloc(56,7);entry.writeUInt32LE(0x201,0);entry.writeUInt32LE(0,16);entries.set(index,entry);}
+ const originals=new Map([...entries].map(([i,b])=>[i,Buffer.from(b)]));
+ const p=new XpadProtocol(d);p.readKeyInfo=async i=>Buffer.from(entries.get(i));
+ await p.remapKnob(true);
+ for(const [index,entry] of entries){assert.deepEqual(entry.subarray(0,16),originals.get(index).subarray(0,16));assert.deepEqual(entry.subarray(20,32),Buffer.alloc(12));assert.deepEqual(entry.subarray(32),originals.get(index).subarray(32));}
+ await p.restoreKeys();for(const [i,b] of originals)assert.deepEqual(entries.get(i),b);
+ assert.equal(writes.every(b=>b[6]===0x10),true);
+});

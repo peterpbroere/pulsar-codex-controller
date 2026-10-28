@@ -25,7 +25,7 @@ function render(v){
  $('review-panel').hidden=v.page!=='details'||!v.review?.review;$('review').textContent=v.review?.review||'';
  $('approve').disabled=v.busy||!v.canApprove;$('reject').disabled=v.busy||!v.review?.actions.includes('reject');
  document.querySelectorAll('[data-key]').forEach(b=>{const key=Number(b.dataset.key);b.disabled=v.busy||(key===0&&!v.canApprove)||(key===1&&!r?.actions.includes('focus'))||(key===2&&!v.snapshot.rows.some(r=>r.state==='waiting'||r.state==='error'));});
- $('status').textContent=v.notice||v.device.error||v.snapshot.error||(v.busy?'Working…':v.snapshot.connected?'Ready · '+v.hotkeys.join(' / '):'Waiting for participating Codex sessions');
+ $('status').textContent=v.notice||v.device.error||v.snapshot.error||(v.busy?'Working…':v.snapshot.connected?'Ready · '+v.inputMode:'Waiting for participating Codex sessions');
 }
 document.querySelectorAll('[data-key]').forEach(b=>b.onclick=()=>perform(()=>window.deck.key(Number(b.dataset.key))));
 document.querySelectorAll('[data-control]').forEach(b=>b.onclick=()=>perform(()=>window.deck.control(b.dataset.control)));

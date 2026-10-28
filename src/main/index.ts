@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog } from 'electron';
 import { join, resolve } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
 import { Backend } from './backend';
@@ -7,6 +7,7 @@ import { displaySvg, rgb565 } from './display';
 import { XpadDevice } from './device/hid';
 import { XpadProtocol } from './device/protocol';
 import { AUXILIARY_BUTTONS, ButtonEdges } from './device/button-input';
+import { DirectInput } from './device/direct-input';
 
 const profileDirectory=process.env.PULSAR_STATE_DIR || (app.isPackaged ? join(app.getPath('appData'),'PulsarCodexDeck') : resolve(__dirname,'../../work/electron-profile'));
 mkdirSync(profileDirectory,{recursive:true});
@@ -26,12 +27,12 @@ async function run() {
   const backend = demo ? null : new Backend(root, agentDeck, python, packagedBackend);
   const device = new XpadDevice(), protocol = new XpadProtocol(device);
   const auxiliaryButtons=new ButtonEdges(AUXILIARY_BUTTONS);
+  const directInput=new DirectInput();
   let readingButtons=false,lastButtonError=0,buttonReads=0;
   let quitting = false, drawing = false, polling = false, remapping = false, keysReady = false;
   let win!: BrowserWindow, tray: Tray | null = null;
   let lastSvg = '', cachedFrame: Buffer | null = null, deviceError = '';
   let lastPaint: Buffer | null = null;
-  const hotkeys: string[] = [];
   const stateDir=app.isPackaged?app.getPath('userData'):join(root,'work'); mkdirSync(stateDir,{recursive:true});
   const preferenceFile=join(stateDir,'preferences.json'),quitFile=join(stateDir,'quit-request');
   if(existsSync(quitFile))unlinkSync(quitFile);
@@ -44,8 +45,8 @@ async function run() {
 
   function view() { return {snapshot:c.snapshot, selected:c.selected, page:c.page, cursor:c.cursor,
     menu:c.menu, review:c.row, confirmation:c.confirm, busy:c.busy, notice:c.notice, preferences:c.preferences, canApprove:c.canApprove,
-    device:{connected:device.connected, ready:protocol.ready && !remapping, keysReady, error:deviceError},
-    hotkeys, demo, svg:displaySvg(c)}; }
+    device:{connected:device.connected, ready:protocol.ready && keysReady && !remapping, keysReady, error:deviceError},
+    inputMode:'Direct USB', demo, svg:displaySvg(c)}; }
   function publish() { if (win && !win.isDestroyed()) win.webContents.send('view', view()); }
   async function execute(intent?: Intent) {
     if (!intent || c.busy || !backend) return;
@@ -112,27 +113,27 @@ async function run() {
     if (!['focus','stop','continue'].includes(verb)) throw Error('Invalid action');
     return execute(c.action(verb));
   });
-  for (const [index, accelerator] of ['F13','F14','F15'].entries()) {
-    if(noDevice)continue;
-    if (globalShortcut.register(accelerator,()=>{void key(index);})) hotkeys.push(accelerator);
-    else deviceError += `Cannot register ${accelerator}. Close conflicting macro software. `;
-  }
-  for(const [accelerator,name] of [['F16','previous'],['F17','next'],['F18','press'],['F19','plus'],['F20','minus']]){
-    if(noDevice)continue;
-    if(globalShortcut.register(accelerator,()=>{void control(name);}))hotkeys.push(accelerator);
-    else deviceError+=`Cannot register ${accelerator}. `;
-  }
+  // Vendor input remains available when a game captures ordinary keyboard keys.
+  const onDirectInput=(packet:Buffer)=>{
+    if(!keysReady||remapping||quitting)return;
+    for(const name of directInput.update(packet)){
+      console.log(`[input] direct ${name}`);
+      if(name.startsWith('key'))void key(Number(name.slice(3))-1);
+      else void control(name);
+    }
+  };
   protocol.onReady = () => {
-    if (hotkeys.length !== 8) { publish(); return; }
+    keysReady=false;directInput.reset();
+    if(!device.aux){deviceError='Direct USB input channel unavailable. Reconnect the pad.';publish();return;}
     remapping = true; publish();
-    void protocol.remapPadKeys([{mod:0,key:0x68},{mod:0,key:0x69},{mod:0,key:0x6a}])
-      .then(()=>protocol.remapKnob())
-      .then(()=>{keysReady=true;})
+    void protocol.remapPadKeys([{mod:0,key:0},{mod:0,key:0},{mod:0,key:0}])
+      .then(()=>protocol.remapKnob(true))
+      .then(()=>{directInput.reset();keysReady=true;})
       .catch(async e=>{keysReady=false; deviceError=String(e); await protocol.restoreKeys();})
       .finally(()=>{remapping=false; lastSvg=''; cachedFrame=null; publish();});
   };
-  device.on('connect',publish);
-  device.on('disconnect',()=>{auxiliaryButtons.reset();keysReady=false; c.back(); lastSvg=''; cachedFrame=null; publish();});
+  device.on('connect',()=>{device.aux?.on('data',onDirectInput);publish();});
+  device.on('disconnect',()=>{directInput.reset();auxiliaryButtons.reset();keysReady=false; c.back(); lastSvg=''; cachedFrame=null; publish();});
   if (!noDevice) device.start();
   const poll = async () => {
     if(existsSync(quitFile)){unlinkSync(quitFile);app.quit();return;}
@@ -166,8 +167,9 @@ async function run() {
     try {
       if(await protocol.checkSettingsButton()){
         // Profile protection only. Raw bits 16/17 own the +/× actions.
-        await protocol.remapPadKeys([{mod:0,key:0x68},{mod:0,key:0x69},{mod:0,key:0x6a}]);
-        await protocol.remapKnob();publish();
+        keysReady=false;directInput.reset();
+        await protocol.remapPadKeys([{mod:0,key:0},{mod:0,key:0},{mod:0,key:0}]);
+        await protocol.remapKnob(true);directInput.reset();keysReady=true;publish();
       }
       const svg=displaySvg(c),row=c.row?structuredClone(c.row):null,signature=svg+':'+c.preferences.brightness;
       if (signature!==lastSvg || !cachedFrame) { cachedFrame=await rgb565(svg,c.preferences.brightness); lastSvg=signature; }
@@ -187,7 +189,7 @@ async function run() {
     void (async()=>{
       // Finish any in-flight LCD burst before restoring mappings.
       while(drawing || remapping || readingButtons) await new Promise(r=>setTimeout(r,20));
-      await protocol.restoreKeys(); device.stop(); globalShortcut.unregisterAll();
+      await protocol.restoreKeys(); device.stop();
       backend?.close(); tray?.destroy(); app.quit();
     })();
   });

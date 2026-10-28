@@ -124,10 +124,11 @@ or send a Save command. An orderly Quit restores the original key/knob mappings.
 Unplug/replug restores the device's saved configuration after a crash or forced
 termination. RGB overrides can remain until a profile switch or reconnect.
 
-Main keys and knob input temporarily use global **F13–F18** shortcuts. F19/F20
-are optional keyboard equivalents for settings/Back. Close conflicting macro
-software if the app reports an unavailable shortcut. +/× use direct raw button
-state, not inferred profile changes or injected approval keystrokes.
+All controls use **direct USB input**, including while a game captures keyboard
+shortcuts. Main keys and the knob use unsolicited vendor events; +/× use raw
+button state. The app temporarily suppresses the main keys' and knob's keyboard
+output, so their original bindings do not also activate in the foreground app.
+No global function-key shortcuts or injected approval keystrokes are used.
 
 ## Troubleshooting
 
@@ -153,7 +154,8 @@ without presenting a prompt.
 **Device not connected / input is unresponsive**
 
 Use a USB data cable, close Bibimbap and other device clients, then reconnect the
-pad. Check for F13–F20 shortcut conflicts. The protocol is unofficial and may
+pad. If an older version stops responding while a game has focus, update to
+v0.1.3 or later for direct USB input. The protocol is unofficial and may
 vary with firmware. Occasional raw-input read timeouts are logged and polling
 continues; include reproducible symptoms when reporting a problem.
 
