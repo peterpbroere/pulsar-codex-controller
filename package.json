@@ -1,6 +1,6 @@
 {
   "name": "pulsar-codex-controller",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Pulsar XPAD Mini controller for existing Codex sessions",
   "license": "MIT",
@@ -19,7 +19,7 @@
     "assets": "node scripts/generate-assets.cjs",
     "demo": "npm run build && electron . --demo --no-device",
     "build:backend": "node scripts/build-backend.cjs",
-    "dist:win": "npm run build && npm run assets && npm run build:backend && electron-builder --win nsis zip --publish never"
+    "dist:win": "npm run build && npm run assets && node scripts/ensure-electron.cjs && npm run build:backend && electron-builder --win nsis zip --publish never"
   },
   "dependencies": {
     "node-hid": "^3.4.0",
