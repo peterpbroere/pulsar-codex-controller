@@ -10,7 +10,7 @@ export function wrap(s:string,width:number) {
     else line+=(line?' ':'')+word;
   }if(line)result.push(line);}return result;
 }
-export function displaySvg(c:Controller):string {
+export function displaySvg(c:Controller,mascotImage?:string):string {
   const row=c.row,selected=c.snapshot.rows.findIndex(r=>r.id===c.selected),waiting=row?.state==='waiting';
   const color=waiting?'#ffc76b':row?.state==='error'?'#ff8295':row?.state==='running'?'#8fbaff':'#7ed9bd';
   const text=(x:number,y:number,s:string,fill='#edf2f7',size=11,weight=400,anchor='start')=>`<text x="${x}" y="${y}" fill="${fill}" font-size="${size}" font-weight="${weight}" text-anchor="${anchor}">${esc(s)}</text>`;
@@ -20,10 +20,16 @@ export function displaySvg(c:Controller):string {
   if(c.page==='agent'){
     top=text(9,13,'CODEX','#7d91a7',8,600)+text(231,13,`${Math.max(0,selected+1)} / ${c.snapshot.rows.length}   ·   ${c.attention.length} WAIT`,'#9cacc0',8,500,'end');
     if(row){body+=text(9,35,clip(row.label,24),'#fff',17,650)+`<circle cx="13" cy="49" r="3" fill="${color}"/>`+text(21,53,waiting?'NEEDS YOU':row.state==='running'?'WORKING':row.state==='error'?'ERROR':'READY',color,9,650)+text(231,53,modeLabel(row.settings),'#9cacc0',9,500,'end');
-      const lines=wrap((row.review||row.detail||row.reason||'Ready for your next instruction').replace(/^Command:\s*/,''),36);
-      lines.slice(0,3).forEach((line,i)=>{body+=text(9,69+i*13,clip(line,36),waiting?'#ffe1af':'#bbc9d8',10);});
+      const width=mascotImage?28:36;
+      const lines=wrap((row.review||row.detail||row.reason||'Ready for your next instruction').replace(/^Command:\s*/,''),width);
+      body+=`<svg x="9" y="58" width="${mascotImage?166:222}" height="42" overflow="hidden">`;
+      lines.slice(0,3).forEach((line,i)=>{body+=text(0,11+i*13,clip(line,width),waiting?'#ffe1af':'#bbc9d8',10);});
+      body+='</svg>';
+      if(mascotImage)body+=`<image x="184" y="56" width="48" height="48" href="${esc(mascotImage)}"/>`;
       body+=text(9,108,lines.length>3?'Preview truncated · press knob for details':'TURN: agent    ·    PRESS: details','#697f95',8);
-    }else body+=text(10,44,'No agents yet','#fff',17,600)+text(10,65,'Start Codex and send a prompt.','#a0b2c5',11)+text(10,90,'Turn to browse · + settings','#697f95',9);
+    }else {body+=text(10,44,'No agents yet','#fff',17,600)+text(10,65,mascotImage?'Start Codex and send':'Start Codex and send a prompt.','#a0b2c5',11)+(mascotImage?text(10,79,'a prompt.','#a0b2c5',11):'')+text(10,96,'Turn to browse · + settings','#697f95',9);
+      if(mascotImage)body+=`<image x="184" y="51" width="48" height="48" href="${esc(mascotImage)}"/>`;
+    }
   }else if(c.page==='details'){
     top=text(9,14,clip(row?.label||'Agent',27),'#d6e2ee',10,600)+text(231,14,'DETAILS','#7d91a7',8,500,'end');
     const lines=wrap(row?.review||row?.detail||row?.reason||'',37),offset=c.scroll%Math.max(1,lines.length);

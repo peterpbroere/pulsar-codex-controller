@@ -21,3 +21,8 @@ scripts/watch-plus.cjs
 scripts/watch-button-state.cjs
 scripts/inspect-controls.cjs
 scripts/check-settings-button.cjs
+assets/mascots/*.zip
+assets/mascots/v1/*.gif
+assets/mascots/v1/preview*.png
+assets/mascots/v1/review*.png
+assets/mascots/v1/preview.html

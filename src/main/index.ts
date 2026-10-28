@@ -8,6 +8,7 @@ import { XpadDevice } from './device/hid';
 import { XpadProtocol } from './device/protocol';
 import { AUXILIARY_BUTTONS, ButtonEdges } from './device/button-input';
 import { DirectInput } from './device/direct-input';
+import { MascotPlayer } from './mascot';
 
 const profileDirectory=process.env.PULSAR_STATE_DIR || (app.isPackaged ? join(app.getPath('appData'),'PulsarCodexDeck') : resolve(__dirname,'../../work/electron-profile'));
 mkdirSync(profileDirectory,{recursive:true});
@@ -32,21 +33,29 @@ async function run() {
   let quitting = false, drawing = false, polling = false, remapping = false, keysReady = false;
   let win!: BrowserWindow, tray: Tray | null = null;
   let lastSvg = '', cachedFrame: Buffer | null = null, deviceError = '';
+  const frameCache=new Map<string,Buffer>();
   let lastPaint: Buffer | null = null;
-  const stateDir=app.isPackaged?app.getPath('userData'):join(root,'work'); mkdirSync(stateDir,{recursive:true});
+  const stateDir=process.env.PULSAR_STATE_DIR||(app.isPackaged?app.getPath('userData'):join(root,'work')); mkdirSync(stateDir,{recursive:true});
   const preferenceFile=join(stateDir,'preferences.json'),quitFile=join(stateDir,'quit-request');
   if(existsSync(quitFile))unlinkSync(quitFile);
-  try{const p=JSON.parse(readFileSync(preferenceFile,'utf8'));if(typeof p.lights==='boolean')c.preferences.lights=p.lights;if(Number.isFinite(p.brightness))c.preferences.brightness=Math.max(25,Math.min(100,p.brightness));}catch{}
+  try{c.loadPreferences(JSON.parse(readFileSync(preferenceFile,'utf8')));}catch{}
+  let mascots:MascotPlayer|null=null;
+  try{mascots=await MascotPlayer.load(root);}catch(e){console.error('[mascot]',e);c.notice='Mascot artwork unavailable. Reinstall the app to restore it.';}
   if (demo) c.update({connected: false, error:'Demo — no real agent controls', rows: [
     {id:'demo1', session_id:'demo1', label:'API service', state:'waiting', reason:'Approval needed', detail:'Run unit tests?', project:'C:\\dev\\example', actions:[], control_token:'-', review:'Command:\nnpm test\nDirectory:\nC:\\dev\\example', control_hint:'Demo'},
     {id:'demo2', session_id:'demo2', label:'Unit tests', state:'running', reason:'Working', detail:'', project:'C:\\dev\\example', actions:[], control_token:'-', review:'', control_hint:'Demo'},
     {id:'demo3', session_id:'demo3', label:'Documentation', state:'idle', reason:'Turn stopped', detail:'', project:'C:\\dev\\example', actions:[], control_token:'-', review:'', control_hint:'Demo'},
   ]});
 
+  function visual() {
+    mascots?.observe({...c.snapshot,connected:c.snapshot.connected||demo});
+    const mascot=mascots?.frame(c.preferences.mascot,c.row,c.snapshot.connected||demo)??null;
+    return {svg:displaySvg(c,mascot?.image),mascot};
+  }
   function view() { return {snapshot:c.snapshot, selected:c.selected, page:c.page, cursor:c.cursor,
     menu:c.menu, review:c.row, confirmation:c.confirm, busy:c.busy, notice:c.notice, preferences:c.preferences, canApprove:c.canApprove,
     device:{connected:device.connected, ready:protocol.ready && keysReady && !remapping, keysReady, error:deviceError},
-    inputMode:'Direct USB', demo, svg:displaySvg(c)}; }
+    inputMode:'Direct USB', demo, ...visual()}; }
   function publish() { if (win && !win.isDestroyed()) win.webContents.send('view', view()); }
   async function execute(intent?: Intent) {
     if (!intent || c.busy || !backend) return;
@@ -91,6 +100,10 @@ async function run() {
   ipcMain.handle('select', (_e,id) => { c.select(String(id)); publish(); });
   ipcMain.handle('back', () => { if (!c.busy) c.back(); publish(); });
   ipcMain.handle('control',(_e,name)=>control(name));
+  ipcMain.handle('mascot',(_e,value)=>{
+    if(c.busy)return;
+    c.setMascot(value);writeFileSync(preferenceFile,JSON.stringify(c.preferences));publish();
+  });
   ipcMain.handle('setup',async()=>{
     if(!backend||c.busy)return;
     const response=await dialog.showMessageBox(win,{type:'question',title:'Connect Codex',
@@ -145,6 +158,13 @@ async function run() {
   };
   void poll();
   const pollTimer = setInterval(()=>{void poll();},1000);
+  // Animation messages update only images, leaving buttons stable during clicks.
+  let lastAnimation='';
+  const animationTimer=setInterval(()=>{
+    if(quitting||!win||win.isDestroyed()||(!win.isVisible()&&!process.env.PULSAR_SMOKE_DIR))return;
+    const frame=visual(),signature=frame.svg+':'+frame.mascot?.choice+':'+frame.mascot?.state+':'+frame.mascot?.index;
+    if(signature!==lastAnimation){lastAnimation=signature;win.webContents.send('animation',frame);}
+  },100);
   const buttonTimer=setInterval(async()=>{
     if(!protocol.ready||remapping||drawing||readingButtons||quitting)return;
     readingButtons=true;
@@ -171,8 +191,12 @@ async function run() {
         await protocol.remapPadKeys([{mod:0,key:0},{mod:0,key:0},{mod:0,key:0}]);
         await protocol.remapKnob(true);directInput.reset();keysReady=true;publish();
       }
-      const svg=displaySvg(c),row=c.row?structuredClone(c.row):null,signature=svg+':'+c.preferences.brightness;
-      if (signature!==lastSvg || !cachedFrame) { cachedFrame=await rgb565(svg,c.preferences.brightness); lastSvg=signature; }
+      const svg=visual().svg,row=c.row?structuredClone(c.row):null,signature=svg+':'+c.preferences.brightness;
+      if (signature!==lastSvg || !cachedFrame) {
+        cachedFrame=frameCache.get(signature)??await rgb565(svg,c.preferences.brightness);lastSvg=signature;
+        frameCache.set(signature,cachedFrame);
+        if(frameCache.size>24)frameCache.delete(frameCache.keys().next().value!);
+      }
       const colors = c.snapshot.rows.some(r=>r.state==='waiting') ? [105,65,10] :
         c.snapshot.rows.some(r=>r.state==='error') ? [110,20,30] :
         c.snapshot.rows.some(r=>r.state==='running') ? [15,50,110] : [15,75,55];
@@ -185,7 +209,7 @@ async function run() {
   app.on('before-quit', e=>{
     if (quitting) return;
     e.preventDefault(); quitting=true;
-    clearInterval(pollTimer); clearInterval(drawTimer); clearInterval(buttonTimer);
+    clearInterval(pollTimer); clearInterval(drawTimer); clearInterval(buttonTimer);clearInterval(animationTimer);
     void (async()=>{
       // Finish any in-flight LCD burst before restoring mappings.
       while(drawing || remapping || readingButtons) await new Promise(r=>setTimeout(r,20));
@@ -197,7 +221,7 @@ async function run() {
     const folder=process.env.PULSAR_SMOKE_DIR; mkdirSync(folder,{recursive:true});
     setTimeout(async()=>{try{
       writeFileSync(join(folder,'status.json'),JSON.stringify(view(),null,2));
-      writeFileSync(join(folder,'lcd.png'),await sharp(Buffer.from(displaySvg(c))).png().toBuffer());
+      writeFileSync(join(folder,'lcd.png'),await sharp(Buffer.from(visual().svg)).png().toBuffer());
       writeFileSync(join(folder,'dashboard.png'),lastPaint||(await win.webContents.capturePage()).toPNG());
     }catch(e){console.error('Smoke capture failed',e);}finally{app.quit();}
     },12000);

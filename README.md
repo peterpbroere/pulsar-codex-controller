@@ -10,6 +10,18 @@ the selected request with a single key press.
 
 **Windows x64 · public preview · no custom firmware required**
 
+### Desk companions
+
+Choose **Cat**, **Owl**, or **Off** using the PC app's Mascot selector, or press
+**+ → Mascot** on the pad and press the knob to cycle the choices. Your choice
+is saved automatically. Both original pixel-art companions animate while an
+agent works, waits for input, rests, or reports an error. After an observed turn
+ends, a short finish animation plays before the companion rests.
+
+The mascot sits beside the activity preview. Press the knob for full details;
+choose Off for the wider text preview. Colors and approval controls still show
+the actual agent state independently of the animation.
+
 ![Desktop companion showing simulated Codex sessions](docs/images/dashboard.png)
 
 *Demo screenshot with synthetic sessions. The physical LCD uses the same layout.*

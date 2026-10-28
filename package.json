@@ -1,6 +1,6 @@
 {
   "name": "pulsar-codex-controller",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Pulsar XPAD Mini controller for existing Codex sessions",
   "license": "MIT",

@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "nativeFrameSize": [
+    64,
+    64
+  ],
+  "previewScale": 3,
+  "mascots": {
+    "cat": {
+      "idle": {
+        "frames": 6,
+        "delayMs": [
+          440,
+          360,
+          340,
+          440,
+          360,
+          500
+        ],
+        "frameDirectory": "cat/idle",
+        "preview": "cat-idle.gif"
+      },
+      "working": {
+        "frames": 5,
+        "delayMs": [
+          150,
+          150,
+          180,
+          150,
+          150
+        ],
+        "frameDirectory": "cat/working",
+        "preview": "cat-working.gif"
+      },
+      "approval": {
+        "frames": 6,
+        "delayMs": [
+          400,
+          250,
+          300,
+          300,
+          200,
+          450
+        ],
+        "frameDirectory": "cat/approval",
+        "preview": "cat-approval.gif"
+      },
+      "done": {
+        "frames": 6,
+        "delayMs": [
+          240,
+          180,
+          180,
+          240,
+          260,
+          350
+        ],
+        "frameDirectory": "cat/done",
+        "preview": "cat-done.gif"
+      },
+      "error": {
+        "frames": 6,
+        "delayMs": [
+          450,
+          300,
+          350,
+          450,
+          300,
+          450
+        ],
+        "frameDirectory": "cat/error",
+        "preview": "cat-error.gif"
+      }
+    },
+    "owl": {
+      "idle": {
+        "frames": 6,
+        "delayMs": [
+          440,
+          360,
+          340,
+          440,
+          360,
+          500
+        ],
+        "frameDirectory": "owl/idle",
+        "preview": "owl-idle.gif"
+      },
+      "working": {
+        "frames": 6,
+        "delayMs": [
+          150,
+          150,
+          180,
+          150,
+          180,
+          150
+        ],
+        "frameDirectory": "owl/working",
+        "preview": "owl-working.gif"
+      },
+      "approval": {
+        "frames": 6,
+        "delayMs": [
+          400,
+          250,
+          300,
+          300,
+          200,
+          450
+        ],
+        "frameDirectory": "owl/approval",
+        "preview": "owl-approval.gif"
+      },
+      "done": {
+        "frames": 6,
+        "delayMs": [
+          240,
+          180,
+          180,
+          240,
+          260,
+          350
+        ],
+        "frameDirectory": "owl/done",
+        "preview": "owl-done.gif"
+      },
+      "error": {
+        "frames": 6,
+        "delayMs": [
+          450,
+          300,
+          350,
+          450,
+          300,
+          450
+        ],
+        "frameDirectory": "owl/error",
+        "preview": "owl-error.gif"
+      }
+    }
+  }
+}

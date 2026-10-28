@@ -1,4 +1,5 @@
 import { Row, Snapshot } from '../shared/types';
+import { isMascotChoice, MascotChoice } from './mascot';
 export const MODES = ['Read-only', 'Auto', 'No prompts', 'YOLO / Full access'];
 export type Page = 'agent' | 'details' | 'settings' | 'confirm' | 'global';
 export interface Intent { method: string; params: Record<string, any> }
@@ -16,7 +17,18 @@ export class Controller {
   selected = ''; page: Page = 'agent'; cursor = 0; scroll = 0; notice = ''; busy = false;
   confirm: {row: Row; mode: string} | null = null;
   displayedApproval: {id: string; session: string; token: string} | null = null;
-  preferences = {brightness: 85, lights: true};
+  preferences = {brightness: 85, lights: true, mascot:'cat' as MascotChoice};
+  loadPreferences(value:unknown) {
+    if(!value||typeof value!=='object')return;
+    const p=value as Record<string,unknown>;
+    if(typeof p.lights==='boolean')this.preferences.lights=p.lights;
+    if(typeof p.brightness==='number'&&Number.isFinite(p.brightness))this.preferences.brightness=Math.max(25,Math.min(100,p.brightness));
+    if(isMascotChoice(p.mascot))this.preferences.mascot=p.mascot;
+  }
+  setMascot(value:unknown) {
+    if(!isMascotChoice(value))throw new Error('Unknown mascot');
+    this.preferences.mascot=value;
+  }
   private returnPage: Page = 'agent';
   private returnCursor = 0;
   update(snapshot: Snapshot) {
@@ -31,7 +43,7 @@ export class Controller {
     ...(this.row?.actions.includes('reject') ? ['Reject request'] : []),
     ...(this.row?.actions.includes('stop') ? ['Stop turn'] : []),
     ...(this.row?.actions.includes('continue') ? ['Continue'] : []), 'Global settings', 'Back']; }
-  get globalMenu() { return [`Screen brightness: ${this.preferences.brightness}%`, `Status lights: ${this.preferences.lights ? 'On' : 'Off'}`, 'Close settings']; }
+  get globalMenu() { return [`Screen brightness: ${this.preferences.brightness}%`, `Status lights: ${this.preferences.lights ? 'On' : 'Off'}`, `Mascot: ${this.preferences.mascot==='cat'?'Cat':this.preferences.mascot==='owl'?'Owl':'Off'}`, 'Close settings']; }
   back() { this.page = 'agent'; this.cursor = 0; this.scroll = 0; this.confirm = null; this.displayedApproval = null; }
   select(id: string) { if (this.busy) return; if (this.snapshot.rows.some(r => r.id === id)) { this.selected = id; this.back(); } }
   action(verb: string, row = this.row): Intent | undefined {
@@ -96,7 +108,8 @@ export class Controller {
     } else if (this.page === 'global') {
       if (this.cursor === 0) this.preferences.brightness = this.preferences.brightness >= 100 ? 25 : Math.min(100,this.preferences.brightness+15);
       if (this.cursor === 1) this.preferences.lights = !this.preferences.lights;
-      if (this.cursor === 2) this.toggleGlobal();
+      if (this.cursor === 2) this.setMascot(this.preferences.mascot==='cat'?'owl':this.preferences.mascot==='owl'?'off':'cat');
+      if (this.cursor === 3) this.toggleGlobal();
     }
   }
   toggleGlobal() {

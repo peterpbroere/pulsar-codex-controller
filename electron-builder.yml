@@ -12,6 +12,9 @@ directories:
 files:
   - dist/**
   - ui/**
+  - assets/mascots/v1/manifest.json
+  - assets/mascots/v1/cat/**
+  - assets/mascots/v1/owl/**
   - package.json
   - LICENSE*
   - THIRD_PARTY_NOTICES.md
