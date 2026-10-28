@@ -1,4 +1,4 @@
-import { Row, Snapshot } from '../shared/types';
+import { Row, Snapshot, ModelChoice } from '../shared/types';
 import { isMascotChoice, MascotChoice } from './mascot';
 export const MODES = ['Read-only', 'Auto', 'No prompts', 'YOLO / Full access'];
 export type Page = 'agent' | 'details' | 'settings' | 'model' | 'effort' | 'confirm' | 'global';
@@ -26,6 +26,7 @@ export class Controller {
   selected = ''; page: Page = 'agent'; cursor = 0; scroll = 0; notice = ''; busy = false;
   confirm: ({kind:'permission';row:Row;mode:string}|{kind:'model'|'effort';row:Row;model:string;effort:string|null;label:string;catalogToken:string}) | null = null;
   displayedApproval: {id: string; session: string; token: string} | null = null;
+  configurationDraft:{row:Row;model:ModelChoice;catalogToken:string}|null=null;
   preferences = {brightness: 85, lights: true, mascot:'cat' as MascotChoice};
   loadPreferences(value:unknown) {
     if(!value||typeof value!=='object')return;
@@ -49,26 +50,38 @@ export class Controller {
   get row() { return this.snapshot.rows.find(r => r.id === this.selected); }
   get attention() { return this.snapshot.rows.filter(r => r.state === 'waiting' || r.state === 'error'); }
   get modelChoices() { return this.snapshot.models??[]; }
-  get effortChoices() { return this.modelChoices.find(m=>m.id===this.row?.settings?.model)?.efforts??[]; }
+  get effortChoices() { return this.configurationDraft?.model.efforts??[]; }
   get canChooseModel() { return !!this.row?.settings_token&&!!this.snapshot.models_token&&this.modelChoices.length>0; }
-  get canChooseEffort() { return this.canChooseModel&&this.effortChoices.length>0; }
   get pickerLabels() {
     return [...(this.page==='model'?this.modelChoices.map(m=>m.label+(m.id===this.row?.settings?.model?' · current':'')):
-      this.effortChoices.map(e=>effortLabel(e)+(e===this.row?.settings?.effort?' · current':''))),'Back'];
+      this.effortChoices.map(e=>effortLabel(e)+(this.configurationDraft?.model.id===this.row?.settings?.model&&e===this.row?.settings?.effort?' · current':''))),'Back'];
   }
-  openConfiguration(kind:'model'|'effort') {
+  openConfiguration() {
     if(this.busy)return;
-    if(!(kind==='model'?this.canChooseModel:this.canChooseEffort)){this.notice=this.snapshot.models_error||'Choices unavailable for this agent';return;}
-    this.page=kind;this.displayedApproval=null;
-    this.cursor=Math.max(0,kind==='model'?this.modelChoices.findIndex(m=>m.id===this.row?.settings?.model):this.effortChoices.indexOf(this.row?.settings?.effort));
+    if(!this.canChooseModel){this.notice=this.snapshot.models_error||'Choices unavailable for this agent';return;}
+    this.page='model';this.displayedApproval=null;this.configurationDraft=null;this.confirm=null;
+    this.cursor=Math.max(0,this.modelChoices.findIndex(m=>m.id===this.row?.settings?.model));
+  }
+  cancelOrBack() {
+    if(this.busy)return;
+    if(this.page==='confirm'&&this.confirm?.kind==='model'&&this.configurationDraft){
+      this.page='effort';this.cursor=Math.max(0,this.effortChoices.indexOf(this.confirm.effort??''));this.confirm=null;
+      if(!this.effortChoices.length)this.cancelOrBack();
+    }else if(this.page==='effort'&&this.configurationDraft){
+      this.page='model';this.cursor=Math.max(0,this.modelChoices.findIndex(m=>m.id===this.configurationDraft?.model.id));this.configurationDraft=null;
+    }else this.back();
+  }
+  private reviewConfiguration(effort:string|null) {
+    const draft=this.configurationDraft;if(!draft)return;
+    this.confirm={kind:'model',row:structuredClone(draft.row),model:draft.model.id,effort,label:draft.model.label,catalogToken:draft.catalogToken};this.page='confirm';
   }
   get menu() { return ['Activity / request', ...(this.row?.settings ? ['Permission mode'] : []),
-    ...(this.canChooseModel?['Model']:[]),...(this.canChooseEffort?['Effort']:[]),
+    ...(this.canChooseModel?['Model & Effort']:[]),
     ...(this.row?.actions.includes('reject') ? ['Reject request'] : []),
     ...(this.row?.actions.includes('stop') ? ['Stop turn'] : []),
     ...(this.row?.actions.includes('continue') ? ['Continue'] : []), 'Global settings', 'Back']; }
   get globalMenu() { return [`Screen brightness: ${this.preferences.brightness}%`, `Status lights: ${this.preferences.lights ? 'On' : 'Off'}`, `Mascot: ${this.preferences.mascot==='cat'?'Cat':this.preferences.mascot==='owl'?'Owl':'Off'}`, 'Close settings']; }
-  back() { this.page = 'agent'; this.cursor = 0; this.scroll = 0; this.confirm = null; this.displayedApproval = null; }
+  back() { this.page = 'agent'; this.cursor = 0; this.scroll = 0; this.confirm = null; this.configurationDraft=null;this.displayedApproval = null; }
   select(id: string) { if (this.busy) return; if (this.snapshot.rows.some(r => r.id === id)) { this.selected = id; this.back(); } }
   action(verb: string, row = this.row): Intent | undefined {
     if (!row || !row.actions.includes(verb)) return;
@@ -122,22 +135,26 @@ export class Controller {
       if (entry === 'Activity / request') { this.scroll += 3; }
       else if (entry === 'Global settings') this.toggleGlobal();
       else if (entry === 'Permission mode') { this.page = 'settings'; this.cursor = Math.max(0,MODES.indexOf(modeLabel(this.row?.settings))); }
-      else if(entry==='Model')this.openConfiguration('model');
-      else if(entry==='Effort')this.openConfiguration('effort');
+      else if(entry==='Model & Effort')this.openConfiguration();
       else if (entry === 'Stop turn' || entry === 'Continue' || entry === 'Reject request') { this.back(); return this.action(entry === 'Stop turn' ? 'stop' : entry === 'Continue' ? 'continue' : 'reject'); }
       else if (entry === 'Back') this.back();
     } else if (this.page === 'settings') {
       if (this.cursor === MODES.length) this.back();
       else if (this.row) { this.confirm = {kind:'permission',row: structuredClone(this.row), mode: MODES[this.cursor]}; this.page = 'confirm'; }
     } else if(this.page==='model'||this.page==='effort'){
-      const kind=this.page;
-      if(this.cursor===this.pickerLabels.length-1){this.back();return;}
-      const target=kind==='model'?this.modelChoices[this.cursor]:this.modelChoices.find(m=>m.id===this.row?.settings?.model);
-      if(!this.row||!target||!this.snapshot.models_token){this.notice='Choices changed. Reopen the selector.';this.back();return;}
-      const currentEffort=this.row.settings?.effort;
-      const effort=kind==='effort'?target.efforts[this.cursor]:target.efforts.includes(currentEffort)?currentEffort:target.defaultEffort;
-      if(effort===undefined){this.back();this.notice='Effort choices changed. Reopen the selector.';return;}
-      this.confirm={kind,row:structuredClone(this.row),model:target.id,effort,label:target.label,catalogToken:this.snapshot.models_token};this.page='confirm';
+      if(this.cursor===this.pickerLabels.length-1){this.cancelOrBack();return;}
+      if(this.page==='model'){
+        const target=this.modelChoices[this.cursor];
+        if(!this.row||!target||!this.snapshot.models_token){this.back();this.notice='Choices changed. Reopen the selector.';return;}
+        this.configurationDraft={row:structuredClone(this.row),model:structuredClone(target),catalogToken:this.snapshot.models_token};
+        if(!target.efforts.length){this.reviewConfiguration(null);return;}
+        const current=this.row.settings?.effort,initial=target.efforts.includes(current)?current:target.defaultEffort;
+        this.page='effort';this.cursor=Math.max(0,target.efforts.indexOf(initial??''));
+      }else{
+        const effort=this.effortChoices[this.cursor];
+        if(effort===undefined){this.back();this.notice='Effort choices changed. Reopen the selector.';return;}
+        this.reviewConfiguration(effort);
+      }
     } else if (this.page === 'confirm') {
       const confirmation = this.confirm; this.back();
       if(confirmation?.kind==='permission')return {method:'settings', params:{id:confirmation.row.id, session_id:confirmation.row.session_id, mode:confirmation.mode, token:confirmation.row.settings_token}};

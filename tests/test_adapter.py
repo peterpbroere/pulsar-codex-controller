@@ -67,7 +67,7 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(effective_settings({'collaborationMode':{'settings':{'reasoning_effort':'medium'}}})['effort'],'medium')
         self.assertIsNone(effective_settings({})['effort'])
 
-    def test_model_update_applies_supported_fallback_and_preserves_permission_fields(self):
+    def test_model_update_sends_reviewed_pair_and_preserves_permission_fields(self):
         a, current, models, params = self.configure_fixture()
         a.read_settings = Mock(side_effect=[current,{**current,'model':'model-b','effort':'medium'}])
         a.handle('configuration',params)
@@ -79,6 +79,12 @@ class AdapterTests(unittest.TestCase):
         a.read_settings = Mock(side_effect=[current,{**current,'effort':'high'}])
         a.handle('configuration',params)
         a.controls.rpc.request.assert_called_once_with('thread/settings/update',{'threadId':'session','effort':'high'})
+
+    def test_combined_model_flow_accepts_any_explicit_supported_effort(self):
+        a, current, models, params=self.configure_fixture();params['effort']='high'
+        a.read_settings=Mock(side_effect=[current,{**current,'model':'model-b','effort':'high'}])
+        a.handle('configuration',params)
+        a.controls.rpc.request.assert_called_once_with('thread/settings/update',{'threadId':'session','model':'model-b','effort':'high'})
 
     def test_stale_settings_and_catalog_cannot_change_model(self):
         for stale in ('token','catalog_token'):

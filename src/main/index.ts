@@ -56,7 +56,7 @@ async function run() {
   function view() { return {snapshot:c.snapshot, selected:c.selected, page:c.page, cursor:c.cursor,
     menu:c.menu, review:c.row, confirmation:c.confirm, busy:c.busy, notice:c.notice, preferences:c.preferences, canApprove:c.canApprove,
     device:{connected:device.connected, ready:protocol.ready && keysReady && !remapping, keysReady, error:deviceError},
-    inputMode:'Direct USB', demo, modelLabel:modelLabel(c.row,c.snapshot),effortLabel:effortLabel(c.row?.settings?.effort),canChooseModel:c.canChooseModel,canChooseEffort:c.canChooseEffort,...visual()}; }
+    inputMode:'Direct USB', demo, modelLabel:modelLabel(c.row,c.snapshot),effortLabel:effortLabel(c.row?.settings?.effort),canChooseModel:c.canChooseModel,...visual()}; }
   function publish() { if (win && !win.isDestroyed()) win.webContents.send('view', view()); }
   async function execute(intent?: Intent) {
     if (!intent || c.busy || !backend) return;
@@ -72,7 +72,7 @@ async function run() {
     if(c.busy)return;
     let intent:Intent|undefined;
     if(name==='previous')c.rotate(-1);else if(name==='next')c.rotate(1);
-    else if(name==='press')intent=c.press();else if(name==='plus')c.toggleGlobal();else if(name==='minus')c.back();
+    else if(name==='press')intent=c.press();else if(name==='plus')c.toggleGlobal();else if(name==='minus')c.cancelOrBack();
     else throw new Error('Invalid control');
     writeFileSync(preferenceFile,JSON.stringify(c.preferences)); publish(); await execute(intent);
   }
@@ -118,7 +118,7 @@ async function run() {
     finally{c.busy=false;publish();}
   });
   ipcMain.handle('action', (_e,verb) => {
-    if(verb==='model'||verb==='effort'){c.openConfiguration(verb);publish();return;}
+    if(verb==='model'){c.openConfiguration();publish();return;}
     if (verb === 'review') { if (c.row?.review && !c.busy) { c.page='details';c.cursor=0; } publish(); return; }
     if (verb === 'settings') { if (c.row?.settings && !c.busy) { c.page='settings'; c.cursor=0; } publish(); return; }
     if (verb === 'approve' || verb === 'reject') {

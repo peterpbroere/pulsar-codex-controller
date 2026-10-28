@@ -203,9 +203,8 @@ class Adapter:
                 raise ValueError("Effort is not supported by the current model")
             update = {"effort": effort}
         else:
-            expected = current.get("effort") if current.get("effort") in target["efforts"] else target["defaultEffort"]
-            if effort != expected:
-                raise ValueError("Model or Effort changed. Review the selection again.")
+            if (target["efforts"] and effort not in target["efforts"]) or (not target["efforts"] and effort is not None):
+                raise ValueError("Effort is not supported by the selected model")
             update = {"model": target["id"]}
             if effort is not None:
                 update["effort"] = effort

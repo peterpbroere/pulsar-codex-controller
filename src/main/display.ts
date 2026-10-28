@@ -38,17 +38,18 @@ export function displaySvg(c:Controller,mascotImage?:string):string {
     const start=Math.max(0,Math.min(c.cursor-1,c.menu.length-2));
     c.menu.slice(start,start+2).forEach((entry,i)=>{const active=start+i===c.cursor;body+=`<rect x="5" y="${75+i*17}" width="230" height="16" rx="3" fill="${active?'#263b4c':'#111c28'}"/>`+text(10,87+i*17,(active?'› ':'  ')+entry,active?'#7ed9bd':'#8b9eb3',9,500);});
   }else if(c.page==='settings'||c.page==='global'||c.page==='model'||c.page==='effort'){
-    const global=c.page==='global',picker=c.page==='model'||c.page==='effort',options=global?c.globalMenu:picker?c.pickerLabels:[...MODES,'Back'];top=text(9,15,global?'GLOBAL SETTINGS':c.page==='model'?'SELECT MODEL':c.page==='effort'?'SELECT EFFORT':'PERMISSION MODE','#7ed9bd',10,650);
+    const global=c.page==='global',picker=c.page==='model'||c.page==='effort',options=global?c.globalMenu:picker?c.pickerLabels:[...MODES,'Back'];top=text(9,15,global?'GLOBAL SETTINGS':c.page==='model'?'MODEL · 1 / 2':c.page==='effort'?'EFFORT · 2 / 2':'PERMISSION MODE','#7ed9bd',10,650);
+    if(c.page==='effort')top+=text(231,15,clip(c.configurationDraft?.model.label??'',19),'#9cacc0',8,500,'end');
     const start=Math.max(0,Math.min(c.cursor-1,options.length-3));
     options.slice(start,start+3).forEach((option,i)=>{const y=29+i*23,active=start+i===c.cursor;body+=`<rect x="5" y="${y}" width="230" height="21" rx="4" fill="${active?'#263b4c':'#111c28'}"/>`+text(11,y+14,(active?'› ':'  ')+option,active?'#fff':'#90a3b8',11,active?600:400);});
-    body+=text(9,108,global?'TURN: choose · PRESS: change · + close':'TURN: choose · PRESS: review · × back','#738ba2',8);footer='';
+    body+=text(9,108,global?'TURN: choose · PRESS: change · + close':c.page==='model'?'TURN: choose · PRESS: next · × cancel':c.page==='effort'?'TURN: choose · PRESS: review · × model':'TURN: choose · PRESS: review · × back','#738ba2',8);footer='';
   }else{
     const q=c.confirm;
     if(q&&q.kind!=='permission'){
-      top=text(9,15,q.kind==='model'?'CONFIRM MODEL CHANGE':'CONFIRM EFFORT CHANGE','#ffc76b',9,650);
+      top=text(9,15,q.kind==='model'?'CONFIRM MODEL & EFFORT':'CONFIRM EFFORT CHANGE','#ffc76b',9,650);
       body+=text(9,39,clip(q.label,28),'#fff',14,650)+text(9,58,'Effort: '+effortLabel(q.effort),'#d6e2ee',12,600)+text(9,75,clip(q.row.label,32),'#aabdd0',10)+text(9,90,'Applies to subsequent turns','#ffc76b',9);
     }else{const mode=q?.mode||'';top=text(9,15,'CONFIRM PERMISSION CHANGE','#ffc76b',9,650);body+=text(9,41,mode,'#fff',16,650)+text(9,61,clip(q?.row.label||'',30),'#aabdd0',11)+text(9,83,mode.includes('Full')?'No sandbox or approval prompts':'Applies to subsequent turns','#ffc76b',10);}
-    body+=text(9,104,'PRESS KNOB: apply   ·   × cancel','#8da3b9',9);footer='';
+    body+=text(9,104,q?.kind==='model'?'PRESS KNOB: apply   ·   × effort':'PRESS KNOB: apply   ·   × cancel','#8da3b9',9);footer='';
   }
   if(c.notice||c.busy)body+=`<rect x="4" y="97" width="232" height="15" rx="3" fill="#263b4c"/>`+text(9,108,clip(c.busy?'Sending…':c.notice,39),'#ffc76b',9);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="135"><rect width="240" height="135" fill="#101925"/><g font-family="Segoe UI,DejaVu Sans,sans-serif">${top}<path d="M8 20H232" stroke="#233244"/>${body}${footer}</g></svg>`;

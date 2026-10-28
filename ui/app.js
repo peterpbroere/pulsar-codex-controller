@@ -27,8 +27,7 @@ function render(v){
  for(const [verb,label] of [['focus','Open on PC'],['stop','Stop turn'],['continue','Continue']]) if(r?.actions.includes(verb)) actions.append(button(label,verb,!v.busy));
  if(r?.review)actions.append(button('Review request','review',!v.busy));
  if(r?.settings)actions.append(button('Permission mode','settings',!v.busy));
- if(v.canChooseModel)actions.append(button('Model','model',!v.busy));
- if(v.canChooseEffort)actions.append(button('Effort','effort',!v.busy));
+ if(v.canChooseModel)actions.append(button('Model & Effort','model',!v.busy));
  const settings=r?.settings;$('settings').textContent=settings?`Approval: ${typeof settings.approvalPolicy==='string'?settings.approvalPolicy:JSON.stringify(settings.approvalPolicy)} · Sandbox: ${settings.sandboxPolicy?.type}\nChanges apply to subsequent turns.`:r?.settings_error||r?.control_hint||'';
  $('review-panel').hidden=v.page!=='details'||!v.review?.review;$('review').textContent=v.review?.review||'';
  $('approve').disabled=v.busy||!v.canApprove;$('reject').disabled=v.busy||!v.review?.actions.includes('reject');
