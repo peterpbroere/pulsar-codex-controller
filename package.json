@@ -1,14 +1,21 @@
 {
   "name": "pulsar-codex-controller",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Pulsar XPAD Mini controller for existing Codex sessions",
   "license": "MIT",
   "author": "peterpbroere",
   "homepage": "https://github.com/peterpbroere/pulsar-codex-controller#readme",
-  "repository": {"type": "git", "url": "https://github.com/peterpbroere/pulsar-codex-controller.git"},
-  "bugs": {"url": "https://github.com/peterpbroere/pulsar-codex-controller/issues"},
-  "engines": {"node": ">=22.12"},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/peterpbroere/pulsar-codex-controller.git"
+  },
+  "bugs": {
+    "url": "https://github.com/peterpbroere/pulsar-codex-controller/issues"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
   "main": "dist/main/index.js",
   "scripts": {
     "build": "tsc",
