@@ -1,0 +1,34 @@
+{
+  "name": "pulsar-codex-controller",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pulsar XPAD Mini controller for existing Codex sessions",
+  "license": "MIT",
+  "author": "peterpbroere",
+  "homepage": "https://github.com/peterpbroere/pulsar-codex-controller#readme",
+  "repository": {"type": "git", "url": "https://github.com/peterpbroere/pulsar-codex-controller.git"},
+  "bugs": {"url": "https://github.com/peterpbroere/pulsar-codex-controller/issues"},
+  "engines": {"node": ">=22.12"},
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && electron .",
+    "test": "npm run build && node --test tests/*.test.cjs",
+    "devices": "node scripts/devices.cjs",
+    "setup": "node scripts/setup.cjs",
+    "assets": "node scripts/generate-assets.cjs",
+    "demo": "npm run build && electron . --demo --no-device",
+    "build:backend": "node scripts/build-backend.cjs",
+    "dist:win": "npm run build && npm run assets && npm run build:backend && electron-builder --win nsis zip --publish never"
+  },
+  "dependencies": {
+    "node-hid": "^3.4.0",
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "^45.1.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.0"
+  }
+}

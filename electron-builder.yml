@@ -1,0 +1,48 @@
+appId: io.github.peterpbroere.pulsar-codex-controller
+productName: Pulsar Codex Deck
+asar: true
+asarUnpack:
+  - node_modules/@img/**
+  - node_modules/node-hid/**
+npmRebuild: false
+electronDist: node_modules/electron/dist
+directories:
+  output: release
+  buildResources: packaging
+files:
+  - dist/**
+  - ui/**
+  - package.json
+  - LICENSE*
+  - THIRD_PARTY_NOTICES.md
+  - '!node_modules/**/{test,tests,example,examples,docs}/**'
+extraResources:
+  - from: build/backend/PulsarBackend
+    to: backend
+  - from: LICENSE
+    to: licenses/LICENSE
+  - from: LICENSE.xpad
+    to: licenses/LICENSE.xpad
+  - from: LICENSE.agent-deck
+    to: licenses/LICENSE.agent-deck
+  - from: THIRD_PARTY_NOTICES.md
+    to: licenses/THIRD_PARTY_NOTICES.md
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+  icon: packaging/icon.ico
+  signExecutable: false
+  artifactName: Pulsar-Codex-Deck-${version}-windows-${arch}-Portable.${ext}
+nsis:
+  include: packaging/installer.nsh
+  artifactName: Pulsar-Codex-Deck-${version}-windows-${arch}-Setup.${ext}
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: false
+  deleteAppDataOnUninstall: false
