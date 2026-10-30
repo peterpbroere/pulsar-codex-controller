@@ -39,11 +39,22 @@ test('two instances independently monitor queue, matching progress and latest im
  await m.tick();assert.equal(a.state.requests.filter(r=>r.url.startsWith('/view')).length,1);
 });
 test('new completion updates image without replacing selection, and stale node progress is ignored',async t=>{
- let now=10000;const s=await server(t,{queue:{queue_running:[[1,'active',{},{}]],queue_pending:[]},helper:{version:1,prompt_id:'different-job',node:'Wrong stage',value:20,max:30}});
- const m=new ComfyMonitor(()=>{},()=>now);t.after(()=>m.close());m.configure([{id:'gpu',name:'GPU',url:s.url}]);await m.tick();assert.equal(m.rows()[0].comfy.progress,undefined);assert.equal(m.rows()[0].comfy.node,'');
+ let now=10000;const s=await server(t,{queue:{queue_running:[[1,'active',{},{}]],queue_pending:[]},helper:{version:1,prompt_id:'different-job',node:'Wrong stage',value:20,max:30,total:{value:3,max:4}}});
+ const m=new ComfyMonitor(()=>{},()=>now);t.after(()=>m.close());m.configure([{id:'gpu',name:'GPU',url:s.url}]);await m.tick();assert.equal(m.rows()[0].comfy.progress,undefined);assert.equal(m.rows()[0].comfy.total,undefined);assert.equal(m.rows()[0].comfy.node,'');
  const c=new Controller();c.update({connected:false,error:'Codex offline',rows:m.rows()});const selected=c.selected;
  now+=2000;s.state.queue.queue_running=[];s.state.history={active:item('active')};await m.tick();c.update({connected:false,error:'',rows:m.rows()});
  assert.equal(c.selected,selected);assert.equal(c.row.reason,'Finished');assert.equal(c.row.comfy.latest.promptId,'active');assert.equal(c.row.comfy.progress,undefined);
+});
+test('node percentages with max one and total node progress appear separately under Generating',async t=>{
+ let now=10000;const s=await server(t,{queue:{queue_running:[[1,'active',{},{}]],queue_pending:[]},helper:{version:1,prompt_id:'active',node:'Switch (Model)',value:.38,max:1,total:{value:3,max:11}}});
+ const m=new ComfyMonitor(()=>{},()=>now);t.after(()=>m.close());m.configure([{id:'a',name:'A',url:s.url}]);await m.tick();
+ const c=new Controller();c.update({rows:m.rows(),connected:false,error:''});const svg=displaySvg(c);assert.match(svg,/GENERATING/);assert.match(svg,/Total: 27%/);assert.match(svg,/Switch \(Model\):/);assert.match(svg,/>38%</);assert.equal((await rgb565(svg)).length,64800);
+ now+=2000;s.state.helper={version:1,prompt_id:'active',node:'Other node',value:0,max:1};await m.tick();c.update({rows:m.rows(),connected:false,error:''});assert.equal(c.row.comfy.total,undefined);assert.match(displaySvg(c),/Total: —/);assert.doesNotMatch(displaySvg(c),/27%/);
+ now+=2000;s.state.offline=true;await m.tick();assert.equal(m.rows()[0].comfy.total,undefined);
+});
+test('invalid total progress is ignored instead of showing an impossible or stale percentage',async t=>{
+ const s=await server(t,{queue:{queue_running:[[1,'active',{},{}]],queue_pending:[]},helper:{version:1,prompt_id:'active',value:1,max:10,total:{value:5,max:0}}});
+ const m=new ComfyMonitor();t.after(()=>m.close());m.configure([{id:'a',name:'A',url:s.url}]);await m.tick();assert.equal(m.rows()[0].comfy.total,undefined);
 });
 test('saved image takes priority over temporary previews and the last image in its batch is shown',async t=>{
  const s=await server(t,{history:{done:item('done',{save:{images:[image('first.png'),image('last & ü.png')]},preview:{images:[image('preview.png','temp')]}})}});

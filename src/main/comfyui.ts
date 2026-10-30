@@ -75,7 +75,7 @@ export class ComfyMonitor {
     try{
       const queue=validQueue(await json(endpoint(base,'queue'),signal));
       const previous=s.row.comfy!,promptId=String(queue.running[0]?.[1]??'');
-      const status:ComfyStatus={...previous,connected:true,running:queue.running.length,pending:queue.pending.length,promptId,node:'',progress:undefined};
+      const status:ComfyStatus={...previous,connected:true,running:queue.running.length,pending:queue.pending.length,promptId,node:'',progress:undefined,total:undefined};
       // A helper supplies browser-originated progress without taking over its WebSocket/client ID.
       if(status.helper||now>=s.helperCheck){
         try{
@@ -84,7 +84,8 @@ export class ComfyMonitor {
           status.helper=true;
           if(promptId&&h.prompt_id===promptId){
             status.node=typeof h.node==='string'?h.node.slice(0,100):'';
-            if(Number.isFinite(h.value)&&Number.isFinite(h.max)&&h.max>1&&h.value>=0&&h.value<=h.max)status.progress={value:h.value,max:h.max};
+            if(Number.isFinite(h.value)&&Number.isFinite(h.max)&&h.max>0&&h.value>=0&&h.value<=h.max)status.progress={value:h.value,max:h.max};
+            if(Number.isFinite(h.total?.value)&&Number.isFinite(h.total?.max)&&h.total.max>0&&h.total.value>=0&&h.total.value<=h.total.max)status.total={value:h.total.value,max:h.total.max};
           }
         }catch{status.helper=false;s.helperCheck=now+30000;}
       }
@@ -106,11 +107,12 @@ export class ComfyMonitor {
       }
       const reason=status.running?'Generating':status.pending?'Queued':terminal?lastOutcome:'Idle';
       const state=status.running?'running':status.pending?'queued':lastOutcome==='Generation failed'?'error':'idle';
-      const stage=status.progress?`${status.node||'Sampling'} · ${status.progress.value}/${status.progress.max} steps`:status.node||reason;
-      s.row={...s.row,state,reason,detail:`${stage}\n${status.pending} queued`,review:`${reason}\n${stage}\n${status.pending} queued\n${status.imageError||''}`,comfy:status,control_hint:status.helper?'Live node progress connected':'Queue and image monitoring. Install the optional progress helper for node/step progress.'};
+      const stage=status.progress?`${status.node||'Current node'}: ${Math.round(status.progress.value/status.progress.max*100)}%`:status.node||reason;
+      const total=status.total?`Total: ${Math.round(status.total.value/status.total.max*100)}%`:'Total: —';
+      s.row={...s.row,state,reason,detail:`${total}\n${stage}\n${status.pending} queued`,review:`${reason}\n${total}\n${stage}\n${status.pending} queued\n${status.imageError||''}`,comfy:status,control_hint:status.helper?'Live progress connected'+(status.running&&!status.total?' · update the progress helper for Total':''):'Queue and image monitoring. Install the progress helper for node and total progress.'};
       s.nextPoll=this.now()+1000;
     }catch(e){
-      if(!signal.aborted){s.row={...s.row,state:'offline',reason:'Offline',detail:'Cannot connect to ComfyUI',review:String((e as Error).message),comfy:{...s.row.comfy!,connected:false,running:0,pending:0,promptId:'',node:'',progress:undefined}};s.nextPoll=this.now()+5000;}
+      if(!signal.aborted){s.row={...s.row,state:'offline',reason:'Offline',detail:'Cannot connect to ComfyUI',review:String((e as Error).message),comfy:{...s.row.comfy!,connected:false,running:0,pending:0,promptId:'',node:'',progress:undefined,total:undefined}};s.nextPoll=this.now()+5000;}
     }finally{
       s.busy=false;
       if(!signal.aborted&&!this.stopped)this.changed();

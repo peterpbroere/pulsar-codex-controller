@@ -22,7 +22,8 @@ function render(v){
  if(!v.snapshot.rows.length){const p=document.createElement('p');p.className='empty';p.textContent='Your participating Codex sessions appear here after their first prompt. Use Connect Codex to set up session discovery.';list.append(p);}
  const r=v.snapshot.rows.find(r=>r.id===v.selected);
  $('name').textContent=r?.label||'No sessions yet';$('project').textContent=r?.project||'';$('reason').textContent=r?.reason||'';
- $('model-effort').textContent=r?.comfy?`${r.comfy.running} running · ${r.comfy.pending} queued${r.comfy.progress?` · ${r.comfy.node||'Sampling'}: ${r.comfy.progress.value}/${r.comfy.progress.max} steps`:''}`:r?`Model: ${v.modelLabel} · Effort: ${v.effortLabel}`:'';
+ if(r?.comfy?.running){const p=r.comfy,percent=x=>x?Math.round(x.value/x.max*100)+'%':'—';$('reason').textContent=`${r.reason}\nTotal: ${percent(p.total)}\n${p.node||'Current node'}: ${percent(p.progress)}`;}
+ $('model-effort').textContent=r?.comfy?`${r.comfy.running} running · ${r.comfy.pending} queued`:r?`Model: ${v.modelLabel} · Effort: ${v.effortLabel}`:'';
  const actions=$('actions');actions.replaceChildren();
  for(const [verb,label] of [['focus','Open on PC'],['stop','Stop turn'],['continue','Continue']]) if(r?.actions.includes(verb)) actions.append(button(label,verb,!v.busy));
  if(r?.review)actions.append(button(r.comfy?'Activity':'Review request','review',!v.busy));

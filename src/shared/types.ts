@@ -4,7 +4,7 @@ export interface ComfyConnection { id:string; name:string; url:string }
 export interface ComfyImage { image:string; filename:string; promptId:string }
 export interface ComfyStatus {
   connected:boolean; url:string; running:number; pending:number; promptId:string;
-  node:string; progress?:{value:number;max:number}; helper:boolean;
+  node:string; progress?:{value:number;max:number}; total?:{value:number;max:number}; helper:boolean;
   latest?:ComfyImage; imageError?:string;
 }
 export interface Row {

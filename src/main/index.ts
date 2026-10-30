@@ -149,7 +149,7 @@ async function run() {
       }
     }
     mkdirSync(destination,{recursive:true});writeFileSync(file,source);
-    return 'Progress helper installed. Restart this ComfyUI instance to enable live node and step progress.';
+    return 'Progress helper installed. Restart this ComfyUI instance when its queue is finished to enable node and total progress.';
   });
   ipcMain.handle('mascot',(_e,value)=>{
     if(c.busy)return;

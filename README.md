@@ -89,7 +89,14 @@ read-only status route and no workflow nodes or dependencies. It leaves browser
 connections alone. ComfyUI normally sends detailed progress only to the client
 that submitted the job, so a separate monitor needs this helper for those details.
 Older versions without the progress registry provide the node name when available.
-Step counts describe the current node, **not overall workflow completion**.
+While generating, the pad shows **Total: …%** and **Current node name: …%**
+under Generating. Total follows ComfyUI's completed/cached node count; the
+second percentage tracks progress within the current node. Slim bars show both
+values beside the latest-image thumbnail. These values are also in the PC panel.
+The helper observes existing progress notifications and forwards them unchanged;
+it does not change execution or browser client IDs. Update an older helper using
+the same Install progress helper button, then restart ComfyUI when its queue is
+finished. Missing progress is shown as **—** rather than a guessed percentage.
 
 Use **Edit connection** or **Remove connection** in the selected entry's PC panel
 to manage it. Removing an entry does not stop ComfyUI or change its queue. This

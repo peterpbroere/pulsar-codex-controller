@@ -23,8 +23,17 @@ export function displaySvg(c:Controller,mascotImage?:string):string {
     if(row?.comfy){
       const comfy=row.comfy,hasImage=!!comfy.latest;
       body+=text(9,35,clip(row.label,24),'#fff',17,650)+`<circle cx="13" cy="49" r="3" fill="${color}"/>`+text(21,53,row.reason.toUpperCase(),color,9,650)+text(231,53,`${comfy.pending} QUEUED`,'#9cacc0',9,500,'end');
-      const stage=comfy.progress?`${comfy.progress.value}/${comfy.progress.max} steps`:comfy.node||row.detail.split('\n')[0];
-      wrap(stage,hasImage?20:36).slice(0,2).forEach((line,i)=>body+=text(9,72+i*13,clip(line,hasImage?20:36),'#bbc9d8',10));
+      if(comfy.running){
+        const contentWidth=hasImage?128:mascotImage?166:222;
+        const percent=(p?:{value:number;max:number})=>p?`${Math.round(p.value/p.max*100)}%`:'—';
+        body+=text(9,69,`Total: ${percent(comfy.total)}`,'#edf2f7',11,600);
+        body+=`<rect x="9" y="72" width="${contentWidth}" height="2" rx="1" fill="#263b4c"/>`;
+        if(comfy.total)body+=`<rect x="9" y="72" width="${contentWidth*comfy.total.value/comfy.total.max}" height="2" rx="1" fill="#6fabff"/>`;
+        const label=clip(comfy.node||'Current node',hasImage?18:mascotImage?24:32);
+        body+=`<svg x="9" y="74" width="${contentWidth-33}" height="15" overflow="hidden">${text(0,11,`${label}:`,'#bbc9d8',9)}</svg>`+text(9+contentWidth,85,percent(comfy.progress),'#bbc9d8',9,400,'end');
+        body+=`<rect x="9" y="92" width="${contentWidth}" height="3" rx="1" fill="#263b4c"/>`;
+        if(comfy.progress)body+=`<rect x="9" y="92" width="${contentWidth*comfy.progress.value/comfy.progress.max}" height="3" rx="1" fill="#7ed9bd"/>`;
+      }else body+=text(9,72,row.reason,'#bbc9d8',10);
       if(hasImage)body+=`<image x="145" y="58" width="87" height="44" preserveAspectRatio="xMidYMid meet" href="${esc(comfy.latest!.image)}"/>`;
       else if(mascotImage)body+=`<image x="184" y="56" width="48" height="48" href="${esc(mascotImage)}"/>`;
       body+=text(9,108,hasImage?'PRESS: latest image / details':'PRESS: details · + settings','#697f95',8);
