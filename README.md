@@ -10,8 +10,11 @@ the selected request with a single key press.
 
 Codex entries use the existing **session title** as their main label on the pad
 and PC. Untitled sessions fall back to their existing name or project directory.
-The working directory stays visible in the PC details. Long titles are shortened
-on the pad; the PC panel shows the full label. Duplicate labels get a short ID
+The working directory appears in a muted line beneath the pad's activity text;
+long paths are shortened, and the PC details show the full path below the status.
+Long overview titles scroll horizontally on the pad, pausing at each end. Short
+titles stay still, and selecting another session or opening a menu resets the
+scroll. The PC panel shows the full label. Duplicate labels get a short ID
 prefix. Titles are read from Codex metadata and update when renamed; Pulsar does
 not generate titles or rename sessions.
 

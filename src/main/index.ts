@@ -11,6 +11,7 @@ import { DirectInput } from './device/direct-input';
 import { MascotPlayer } from './mascot';
 import { ComfyMonitor, connection } from './comfyui';
 import { Snapshot } from '../shared/types';
+import { TitleScroller } from './title-scroll';
 
 const profileDirectory=process.env.PULSAR_STATE_DIR || (app.isPackaged ? join(app.getPath('appData'),'PulsarCodexDeck') : resolve(__dirname,'../../work/electron-profile'));
 mkdirSync(profileDirectory,{recursive:true});
@@ -36,6 +37,7 @@ async function run() {
   let win!: BrowserWindow, tray: Tray | null = null;
   let lastSvg = '', cachedFrame: Buffer | null = null, deviceError = '';
   const frameCache=new Map<string,Buffer>();
+  const titles=new TitleScroller();
   let lastPaint: Buffer | null = null;
   const stateDir=process.env.PULSAR_STATE_DIR||(app.isPackaged?app.getPath('userData'):join(root,'work')); mkdirSync(stateDir,{recursive:true});
   const preferenceFile=join(stateDir,'preferences.json'),quitFile=join(stateDir,'quit-request');
@@ -66,7 +68,9 @@ async function run() {
   function visual() {
     mascots?.observe({...c.snapshot,connected:c.snapshot.connected||demo||c.snapshot.rows.some(r=>r.comfy?.connected)});
     const mascot=mascots?.frame(c.preferences.mascot,c.row,c.row?.comfy?c.row.comfy.connected:c.snapshot.connected||demo)??null;
-    return {svg:displaySvg(c,mascot?.image),mascot};
+    const titleFrame=c.page==='agent'&&c.row?titles.frame(c.row.id,c.row.label):undefined;
+    if(!titleFrame)titles.reset();
+    return {svg:displaySvg(c,mascot?.image,titleFrame),mascot};
   }
   function view() { return {snapshot:c.snapshot, selected:c.selected, page:c.page, cursor:c.cursor,
     menu:c.menu, review:c.row, confirmation:c.confirm, busy:c.busy, notice:c.notice, preferences:c.preferences, canApprove:c.canApprove,
@@ -189,6 +193,7 @@ async function run() {
     }
   };
   protocol.onReady = () => {
+    titles.reset();
     keysReady=false;directInput.reset();
     if(!device.aux){deviceError='Direct USB input channel unavailable. Reconnect the pad.';publish();return;}
     remapping = true; publish();
@@ -196,10 +201,10 @@ async function run() {
       .then(()=>protocol.remapKnob(true))
       .then(()=>{directInput.reset();keysReady=true;})
       .catch(async e=>{keysReady=false; deviceError=String(e); await protocol.restoreKeys();})
-      .finally(()=>{remapping=false; lastSvg=''; cachedFrame=null; publish();});
+      .finally(()=>{remapping=false;titles.reset(); lastSvg=''; cachedFrame=null; publish();});
   };
   device.on('connect',()=>{device.aux?.on('data',onDirectInput);publish();});
-  device.on('disconnect',()=>{directInput.reset();auxiliaryButtons.reset();keysReady=false; c.back(); lastSvg=''; cachedFrame=null; publish();});
+  device.on('disconnect',()=>{directInput.reset();auxiliaryButtons.reset();keysReady=false; c.back();titles.reset(); lastSvg=''; cachedFrame=null; publish();});
   if (!noDevice) device.start();
   const poll = async () => {
     if(existsSync(quitFile)){unlinkSync(quitFile);app.quit();return;}

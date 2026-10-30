@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import { Controller, MODES, modeLabel, modelLabel, effortLabel } from './controller';
+import { TITLE_FONT, type TitleFrame } from './title-scroll';
 const esc = (s: unknown) => String(s ?? '').replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c]!));
 const clip=(s:string,n:number)=>Array.from(s).length>n?Array.from(s).slice(0,n-1).join('')+'…':s;
 export function wrap(s:string,width:number) {
@@ -10,11 +11,12 @@ export function wrap(s:string,width:number) {
     else line+=(line?' ':'')+word;
   }if(line)result.push(line);}return result;
 }
-export function displaySvg(c:Controller,mascotImage?:string):string {
+export function displaySvg(c:Controller,mascotImage?:string,titleFrame?:TitleFrame):string {
   const row=c.row,selected=c.rows.findIndex(r=>r.id===c.selected),waiting=row?.state==='waiting';
   const color=waiting?'#ffc76b':row?.state==='error'?'#ff8295':row?.state==='running'||row?.state==='queued'?'#8fbaff':row?.state==='offline'?'#8797a9':'#7ed9bd';
   const text=(x:number,y:number,s:string,fill='#edf2f7',size=11,weight=400,anchor='start')=>`<text x="${x}" y="${y}" fill="${fill}" font-size="${size}" font-weight="${weight}" text-anchor="${anchor}">${esc(s)}</text>`;
   let body='',top='',footer='';
+  const heading=(label:string)=>`<svg x="9" y="20" width="222" height="24" overflow="hidden" font-family="${TITLE_FONT.family}">${text(-(titleFrame?.offset??0),17,label,'#fff',TITLE_FONT.size,TITLE_FONT.weight)}</svg>`;
   const buttons=[['1','APPROVE',c.canApprove],['2','OPEN PC',row?.actions.includes('focus')],['3','ATTENTION',c.attention.length>0]];
   for(let i=0;i<3;i++)footer+=`<rect x="${i*80+3}" y="114" width="74" height="18" rx="4" fill="${buttons[i][2]?'#203043':'#141f2b'}"/>`+text(i*80+8,126,String(buttons[i][0]),buttons[i][2]?'#7ed9bd':'#526275',8,600)+text(i*80+20,126,String(buttons[i][1]),buttons[i][2]?'#eef3f8':'#526275',8,600);
   if(c.page==='agent'){
@@ -22,7 +24,7 @@ export function displaySvg(c:Controller,mascotImage?:string):string {
     top=`<svg x="9" y="0" width="150" height="18" overflow="hidden">${text(0,13,configuration,'#9eafc3',8,600)}</svg>`+text(231,13,`${Math.max(0,selected+1)} / ${c.rows.length}   ·   ${c.attention.length} WAIT`,'#9cacc0',8,500,'end');
     if(row?.comfy){
       const comfy=row.comfy,hasImage=!!comfy.latest;
-      body+=text(9,35,clip(row.label,24),'#fff',17,650)+`<circle cx="13" cy="49" r="3" fill="${color}"/>`+text(21,53,row.reason.toUpperCase(),color,9,650)+text(231,53,`${comfy.pending} QUEUED`,'#9cacc0',9,500,'end');
+      body+=heading(row.label)+`<circle cx="13" cy="49" r="3" fill="${color}"/>`+text(21,53,row.reason.toUpperCase(),color,9,650)+text(231,53,`${comfy.pending} QUEUED`,'#9cacc0',9,500,'end');
       if(comfy.running){
         const contentWidth=hasImage?128:mascotImage?166:222;
         const percent=(p?:{value:number;max:number})=>p?`${Math.round(p.value/p.max*100)}%`:'—';
@@ -37,14 +39,21 @@ export function displaySvg(c:Controller,mascotImage?:string):string {
       if(hasImage)body+=`<image x="145" y="58" width="87" height="44" preserveAspectRatio="xMidYMid meet" href="${esc(comfy.latest!.image)}"/>`;
       else if(mascotImage)body+=`<image x="184" y="56" width="48" height="48" href="${esc(mascotImage)}"/>`;
       body+=text(9,108,hasImage?'PRESS: latest image / details':'PRESS: details · + settings','#697f95',8);
-    }else if(row){body+=text(9,35,clip(row.label,24),'#fff',17,650)+`<circle cx="13" cy="49" r="3" fill="${color}"/>`+text(21,53,waiting?'NEEDS YOU':row.state==='running'?'WORKING':row.state==='error'?'ERROR':'READY',color,9,650)+text(231,53,modeLabel(row.settings),'#9cacc0',9,500,'end');
+    }else if(row){body+=heading(row.label)+`<circle cx="13" cy="49" r="3" fill="${color}"/>`+text(21,53,waiting?'NEEDS YOU':row.state==='running'?'WORKING':row.state==='error'?'ERROR':'READY',color,9,650)+text(231,53,modeLabel(row.settings),'#9cacc0',9,500,'end');
       const width=mascotImage?28:36;
       const lines=wrap((row.review||row.detail||row.reason||'Ready for your next instruction').replace(/^Command:\s*/,''),width);
       body+=`<svg x="9" y="58" width="${mascotImage?166:222}" height="42" overflow="hidden">`;
-      lines.slice(0,3).forEach((line,i)=>{body+=text(0,11+i*13,clip(line,width),waiting?'#ffe1af':'#bbc9d8',10);});
+      if(lines.length>3)body+='<title>Preview truncated · press knob for details</title>';
+      lines.slice(0,3).forEach((line,i)=>{body+=text(0,11+i*13,clip(line+(i===2&&lines.length>3?' …':''),width),waiting?'#ffe1af':'#bbc9d8',10);});
       body+='</svg>';
       if(mascotImage)body+=`<image x="184" y="56" width="48" height="48" href="${esc(mascotImage)}"/>`;
-      body+=text(9,108,lines.length>3?'Preview truncated · press knob for details':'TURN: agent    ·    PRESS: details','#697f95',8);
+      const directoryY=lines.length>2?108:lines.length===2?95:82;
+      if(row.project){
+        const chars=Array.from(row.project),limit=mascotImage?34:46;
+        const path=chars.length>limit?'…'+chars.slice(1-limit).join(''):row.project;
+        body+=`<svg x="9" y="${directoryY-9}" width="${mascotImage?166:222}" height="12" overflow="hidden">${text(0,9,'DIR: '+path,'#8b9eb3',8)}</svg>`;
+      }
+      if(!row.project||directoryY<108)body+=text(9,108,lines.length>3?'Preview truncated · press knob for details':'TURN: agent    ·    PRESS: details','#697f95',8);
     }else {body+=text(10,44,'No agents yet','#fff',17,600)+text(10,65,mascotImage?'Start Codex and send':'Start Codex and send a prompt.','#a0b2c5',11)+(mascotImage?text(10,79,'a prompt.','#a0b2c5',11):'')+text(10,96,'Turn to browse · + settings','#697f95',9);
       if(mascotImage)body+=`<image x="184" y="51" width="48" height="48" href="${esc(mascotImage)}"/>`;
     }
