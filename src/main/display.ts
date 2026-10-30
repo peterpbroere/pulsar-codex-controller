@@ -12,15 +12,23 @@ export function wrap(s:string,width:number) {
 }
 export function displaySvg(c:Controller,mascotImage?:string):string {
   const row=c.row,selected=c.snapshot.rows.findIndex(r=>r.id===c.selected),waiting=row?.state==='waiting';
-  const color=waiting?'#ffc76b':row?.state==='error'?'#ff8295':row?.state==='running'?'#8fbaff':'#7ed9bd';
+  const color=waiting?'#ffc76b':row?.state==='error'?'#ff8295':row?.state==='running'||row?.state==='queued'?'#8fbaff':row?.state==='offline'?'#8797a9':'#7ed9bd';
   const text=(x:number,y:number,s:string,fill='#edf2f7',size=11,weight=400,anchor='start')=>`<text x="${x}" y="${y}" fill="${fill}" font-size="${size}" font-weight="${weight}" text-anchor="${anchor}">${esc(s)}</text>`;
   let body='',top='',footer='';
   const buttons=[['1','APPROVE',c.canApprove],['2','OPEN PC',row?.actions.includes('focus')],['3','ATTENTION',c.attention.length>0]];
   for(let i=0;i<3;i++)footer+=`<rect x="${i*80+3}" y="114" width="74" height="18" rx="4" fill="${buttons[i][2]?'#203043':'#141f2b'}"/>`+text(i*80+8,126,String(buttons[i][0]),buttons[i][2]?'#7ed9bd':'#526275',8,600)+text(i*80+20,126,String(buttons[i][1]),buttons[i][2]?'#eef3f8':'#526275',8,600);
   if(c.page==='agent'){
-    const configuration=row?`${clip(modelLabel(row,c.snapshot),20)} · ${effortLabel(row.settings?.effort)}`:'CODEX';
+    const configuration=row?.source==='comfyui'?'COMFYUI':row?`${clip(modelLabel(row,c.snapshot),20)} · ${effortLabel(row.settings?.effort)}`:'CODEX';
     top=`<svg x="9" y="0" width="150" height="18" overflow="hidden">${text(0,13,configuration,'#9eafc3',8,600)}</svg>`+text(231,13,`${Math.max(0,selected+1)} / ${c.snapshot.rows.length}   ·   ${c.attention.length} WAIT`,'#9cacc0',8,500,'end');
-    if(row){body+=text(9,35,clip(row.label,24),'#fff',17,650)+`<circle cx="13" cy="49" r="3" fill="${color}"/>`+text(21,53,waiting?'NEEDS YOU':row.state==='running'?'WORKING':row.state==='error'?'ERROR':'READY',color,9,650)+text(231,53,modeLabel(row.settings),'#9cacc0',9,500,'end');
+    if(row?.comfy){
+      const comfy=row.comfy,hasImage=!!comfy.latest;
+      body+=text(9,35,clip(row.label,24),'#fff',17,650)+`<circle cx="13" cy="49" r="3" fill="${color}"/>`+text(21,53,row.reason.toUpperCase(),color,9,650)+text(231,53,`${comfy.pending} QUEUED`,'#9cacc0',9,500,'end');
+      const stage=comfy.progress?`${comfy.progress.value}/${comfy.progress.max} steps`:comfy.node||row.detail.split('\n')[0];
+      wrap(stage,hasImage?20:36).slice(0,2).forEach((line,i)=>body+=text(9,72+i*13,clip(line,hasImage?20:36),'#bbc9d8',10));
+      if(hasImage)body+=`<image x="145" y="58" width="87" height="44" preserveAspectRatio="xMidYMid meet" href="${esc(comfy.latest!.image)}"/>`;
+      else if(mascotImage)body+=`<image x="184" y="56" width="48" height="48" href="${esc(mascotImage)}"/>`;
+      body+=text(9,108,hasImage?'PRESS: latest image / details':'PRESS: details · + settings','#697f95',8);
+    }else if(row){body+=text(9,35,clip(row.label,24),'#fff',17,650)+`<circle cx="13" cy="49" r="3" fill="${color}"/>`+text(21,53,waiting?'NEEDS YOU':row.state==='running'?'WORKING':row.state==='error'?'ERROR':'READY',color,9,650)+text(231,53,modeLabel(row.settings),'#9cacc0',9,500,'end');
       const width=mascotImage?28:36;
       const lines=wrap((row.review||row.detail||row.reason||'Ready for your next instruction').replace(/^Command:\s*/,''),width);
       body+=`<svg x="9" y="58" width="${mascotImage?166:222}" height="42" overflow="hidden">`;
@@ -31,6 +39,11 @@ export function displaySvg(c:Controller,mascotImage?:string):string {
     }else {body+=text(10,44,'No agents yet','#fff',17,600)+text(10,65,mascotImage?'Start Codex and send':'Start Codex and send a prompt.','#a0b2c5',11)+(mascotImage?text(10,79,'a prompt.','#a0b2c5',11):'')+text(10,96,'Turn to browse · + settings','#697f95',9);
       if(mascotImage)body+=`<image x="184" y="51" width="48" height="48" href="${esc(mascotImage)}"/>`;
     }
+  }else if(c.page==='image'){
+    top=text(9,14,clip(row?.label||'ComfyUI',27),'#d6e2ee',10,600)+text(231,14,'LATEST IMAGE','#7d91a7',8,500,'end');
+    if(row?.comfy?.latest)body+=`<image x="1" y="23" width="238" height="97" preserveAspectRatio="xMidYMid meet" href="${esc(row.comfy.latest.image)}"/>`+text(9,132,clip(row.comfy.latest.filename,33)+' · × back','#8da3b9',8);
+    else body+=text(9,60,'No image available yet','#bbc9d8',12);
+    footer='';
   }else if(c.page==='details'){
     top=text(9,14,clip(row?.label||'Agent',27),'#d6e2ee',10,600)+text(231,14,'DETAILS','#7d91a7',8,500,'end');
     const lines=wrap(row?.review||row?.detail||row?.reason||'',37),offset=c.scroll%Math.max(1,lines.length);

@@ -1,7 +1,7 @@
 import { Row, Snapshot, ModelChoice } from '../shared/types';
 import { isMascotChoice, MascotChoice } from './mascot';
 export const MODES = ['Read-only', 'Auto', 'No prompts', 'YOLO / Full access'];
-export type Page = 'agent' | 'details' | 'settings' | 'model' | 'effort' | 'confirm' | 'global';
+export type Page = 'agent' | 'details' | 'image' | 'settings' | 'model' | 'effort' | 'confirm' | 'global';
 export interface Intent { method: string; params: Record<string, any> }
 export function effortLabel(value:unknown):string {
   if(value===null)return 'Default';
@@ -75,7 +75,7 @@ export class Controller {
     const draft=this.configurationDraft;if(!draft)return;
     this.confirm={kind:'model',row:structuredClone(draft.row),model:draft.model.id,effort,label:draft.model.label,catalogToken:draft.catalogToken};this.page='confirm';
   }
-  get menu() { return ['Activity / request', ...(this.row?.settings ? ['Permission mode'] : []),
+  get menu() { return [...(this.row?.comfy?.latest?['Latest image']:[]),'Activity / request', ...(this.row?.settings ? ['Permission mode'] : []),
     ...(this.canChooseModel?['Model & Effort']:[]),
     ...(this.row?.actions.includes('reject') ? ['Reject request'] : []),
     ...(this.row?.actions.includes('stop') ? ['Stop turn'] : []),
@@ -85,6 +85,7 @@ export class Controller {
   select(id: string) { if (this.busy) return; if (this.snapshot.rows.some(r => r.id === id)) { this.selected = id; this.back(); } }
   action(verb: string, row = this.row): Intent | undefined {
     if (!row || !row.actions.includes(verb)) return;
+    if(row.source==='comfyui')return verb==='focus'?{method:'comfy-focus',params:{id:row.id}}:undefined;
     return {method: 'action', params: {id: row.id, session_id: row.session_id, verb, token: row.control_token}};
   }
   markDisplayed(id: string, session: string, token: string) {
@@ -93,7 +94,7 @@ export class Controller {
   }
   get canApprove() {
     const r = this.row, d = this.displayedApproval;
-    return !!r && !!d && r.actions.includes('approve') && r.id === d.id && r.session_id === d.session && r.control_token === d.token;
+    return !!r && r.source!=='comfyui' && !!d && r.actions.includes('approve') && r.id === d.id && r.session_id === d.session && r.control_token === d.token;
   }
   key(key: number): Intent | undefined {
     if (this.busy) return;
@@ -121,7 +122,8 @@ export class Controller {
       const rows = this.snapshot.rows; if (!rows.length) return;
       const index = rows.findIndex(r => r.id === this.selected);
       this.select(rows[(index + delta + rows.length) % rows.length].id);
-    } else if (this.page === 'details') this.cursor = (this.cursor + delta + this.menu.length) % this.menu.length;
+    } else if(this.page==='image')this.select(this.snapshot.rows[(this.snapshot.rows.findIndex(r=>r.id===this.selected)+delta+this.snapshot.rows.length)%this.snapshot.rows.length]?.id??'');
+    else if (this.page === 'details') this.cursor = (this.cursor + delta + this.menu.length) % this.menu.length;
     else if (this.page === 'settings') this.cursor = (this.cursor + delta + MODES.length + 1) % (MODES.length + 1);
     else if (this.page === 'model'||this.page==='effort') this.cursor=(this.cursor+delta+this.pickerLabels.length)%this.pickerLabels.length;
     else if (this.page === 'global') this.cursor = (this.cursor + delta + this.globalMenu.length) % this.globalMenu.length;
@@ -132,13 +134,15 @@ export class Controller {
     if (this.page === 'agent') { this.page = 'details'; this.cursor = 0; this.scroll = 0; }
     else if (this.page === 'details') {
       const entry = this.menu[this.cursor];
-      if (entry === 'Activity / request') { this.scroll += 3; }
+      if(entry==='Latest image'){this.page='image';this.displayedApproval=null;}
+      else if (entry === 'Activity / request') { this.scroll += 3; }
       else if (entry === 'Global settings') this.toggleGlobal();
       else if (entry === 'Permission mode') { this.page = 'settings'; this.cursor = Math.max(0,MODES.indexOf(modeLabel(this.row?.settings))); }
       else if(entry==='Model & Effort')this.openConfiguration();
       else if (entry === 'Stop turn' || entry === 'Continue' || entry === 'Reject request') { this.back(); return this.action(entry === 'Stop turn' ? 'stop' : entry === 'Continue' ? 'continue' : 'reject'); }
       else if (entry === 'Back') this.back();
-    } else if (this.page === 'settings') {
+    } else if(this.page==='image'){this.page='details';this.cursor=0;}
+    else if (this.page === 'settings') {
       if (this.cursor === MODES.length) this.back();
       else if (this.row) { this.confirm = {kind:'permission',row: structuredClone(this.row), mode: MODES[this.cursor]}; this.page = 'confirm'; }
     } else if(this.page==='model'||this.page==='effort'){

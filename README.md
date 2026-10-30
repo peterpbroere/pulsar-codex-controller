@@ -43,6 +43,53 @@ change while a selection is being reviewed, reopen the selector to review it aga
 
 *Demo screenshot with synthetic sessions. The physical LCD uses the same layout.*
 
+### ComfyUI connections
+
+Click **+ Add ComfyUI connection** in the PC app and enter a **Name** and the
+instance's **Server URL** (for example, `http://127.0.0.1:8188`). Test the
+connection, then save. Add another connection for each separate server: an AMD
+instance and an NVIDIA instance can have their own names, URLs, queues and images.
+Up to eight connections are supported, including servers on your local network.
+The URL can include a reverse-proxy path; authenticated servers are not supported
+in this version. Connections are saved locally and reconnect automatically.
+
+Turn the knob to browse ComfyUI entries alongside Codex agents. Each shows
+whether it is idle, queued, generating, finished, failed or offline, plus the
+number of pending jobs. **Key 2** opens the selected ComfyUI server on the PC.
+**Key 1** retains its approval meaning and has no action on ComfyUI entries.
+**Key 3** includes ComfyUI failures in its attention cycle. Queued jobs do not
+count as requests for human attention.
+
+The latest completed image appears as a thumbnail on the pad and a larger image
+in the PC app. **Press the knob → Latest image → press** for a larger pad view;
+**×** returns to the overview. The PC app also has a **View image on pad** button.
+Images are fitted without cropping, and stay visible while another job runs or
+the server is offline. A failed image download keeps the previous image. These
+are completed results, rather than live intermediate sampling previews.
+
+Queue and image monitoring use ComfyUI's built-in read-only HTTP endpoints;
+no workflow changes or ComfyUI extension are required. Images are selected from
+the latest 40 history entries, preferring saved output images over temporary
+previews and showing the final image of a batch. PNG, JPEG, WebP, GIF, AVIF and
+BMP image outputs are supported (animated files show their first frame).
+Video-only workflows have status monitoring but no image preview.
+History is held by ComfyUI: a fresh server with no history has no previous result
+to retrieve. Thumbnails stay in memory for the current deck process.
+
+For **live node and step progress**, edit the connection, expand **Live node and
+step progress**, click **Install progress helper…**, and choose that instance's
+ComfyUI folder containing `main.py` and `custom_nodes`. Restart ComfyUI afterward.
+Repeat for other installations as needed. The bundled optional helper adds one
+read-only status route and no workflow nodes or dependencies. It leaves browser
+connections alone. ComfyUI normally sends detailed progress only to the client
+that submitted the job, so a separate monitor needs this helper for those details.
+Older versions without the progress registry provide the node name when available.
+Step counts describe the current node, **not overall workflow completion**.
+
+Use **Edit connection** or **Remove connection** in the selected entry's PC panel
+to manage it. Removing an entry does not stop ComfyUI or change its queue. This
+version monitors existing jobs; it does not launch or cancel generations.
+
 ## Download and get started
 
 1. **[Download the latest Windows release](https://github.com/peterpbroere/pulsar-codex-controller/releases).**
@@ -73,6 +120,7 @@ SHA256 hash with `SHA256SUMS.txt` from the same release.
 - Inspect details, reject requests, interrupt a turn, or send a Continue prompt.
 - Change the selected session's permission preset for subsequent turns.
 - Adjust display brightness and switch status lighting on/off.
+- Monitor multiple ComfyUI servers and view their latest generated images.
 
 ## Physical controls
 
@@ -105,6 +153,9 @@ the tray menu to exit. The app does not start at login automatically.
 
 Waiting takes priority over error, running, and idle states. Reported session
 states are preserved; inactivity alone never closes or hides a session.
+ComfyUI jobs that are running or queued also light blue; failed generations
+contribute to red. An offline connection is shown on its entry and does not
+count as a generation error or pending approval.
 
 ### Permission presets
 
@@ -191,6 +242,7 @@ continues; include reproducible symptoms when reporting a problem.
 **Where are settings and hooks stored?**
 
 - Packaged-app preferences/profile: `%APPDATA%\PulsarCodexDeck`.
+- ComfyUI connection names and URLs: `comfyui.json` in that profile.
 - Session event journal: `%LOCALAPPDATA%\PulsarCodexDeck\events.sqlite3`.
 - If an existing Agent Deck journal is found, it is reused for compatibility.
 - Codex hooks: `%CODEX_HOME%\hooks.json`, or `%USERPROFILE%\.codex\hooks.json`.

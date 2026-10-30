@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, shell } from 'electron';
 import { join, resolve } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
 import { Backend } from './backend';
@@ -9,6 +9,8 @@ import { XpadProtocol } from './device/protocol';
 import { AUXILIARY_BUTTONS, ButtonEdges } from './device/button-input';
 import { DirectInput } from './device/direct-input';
 import { MascotPlayer } from './mascot';
+import { ComfyMonitor, connection } from './comfyui';
+import { Snapshot } from '../shared/types';
 
 const profileDirectory=process.env.PULSAR_STATE_DIR || (app.isPackaged ? join(app.getPath('appData'),'PulsarCodexDeck') : resolve(__dirname,'../../work/electron-profile'));
 mkdirSync(profileDirectory,{recursive:true});
@@ -39,6 +41,19 @@ async function run() {
   const preferenceFile=join(stateDir,'preferences.json'),quitFile=join(stateDir,'quit-request');
   if(existsSync(quitFile))unlinkSync(quitFile);
   try{c.loadPreferences(JSON.parse(readFileSync(preferenceFile,'utf8')));}catch{}
+  const comfyFile=join(stateDir,'comfyui.json');
+  let codexSnapshot:Snapshot=c.snapshot;
+  function syncSnapshot(){c.update({...codexSnapshot,rows:[...codexSnapshot.rows,...comfy.rows()]});}
+  const comfy=new ComfyMonitor(()=>{syncSnapshot();publish();});
+  try{
+    if(existsSync(comfyFile)){
+      const configs=JSON.parse(readFileSync(comfyFile,'utf8'));
+      if(!Array.isArray(configs)||configs.length>8)throw Error('Invalid ComfyUI connection file');
+      const parsed=configs.map(connection);
+      if(new Set(parsed.map(x=>x.id)).size!==parsed.length)throw Error('Duplicate ComfyUI connection IDs');
+      if(!demo)comfy.configure(parsed);
+    }
+  }catch(e){c.notice='Could not load ComfyUI connections: '+String((e as Error).message);}
   let mascots:MascotPlayer|null=null;
   try{mascots=await MascotPlayer.load(root);}catch(e){console.error('[mascot]',e);c.notice='Mascot artwork unavailable. Reinstall the app to restore it.';}
   if (demo) c.update({connected: false, error:'Demo — no real agent controls',
@@ -49,19 +64,23 @@ async function run() {
   ]});
 
   function visual() {
-    mascots?.observe({...c.snapshot,connected:c.snapshot.connected||demo});
-    const mascot=mascots?.frame(c.preferences.mascot,c.row,c.snapshot.connected||demo)??null;
+    mascots?.observe({...c.snapshot,connected:c.snapshot.connected||demo||c.snapshot.rows.some(r=>r.comfy?.connected)});
+    const mascot=mascots?.frame(c.preferences.mascot,c.row,c.row?.comfy?c.row.comfy.connected:c.snapshot.connected||demo)??null;
     return {svg:displaySvg(c,mascot?.image),mascot};
   }
   function view() { return {snapshot:c.snapshot, selected:c.selected, page:c.page, cursor:c.cursor,
     menu:c.menu, review:c.row, confirmation:c.confirm, busy:c.busy, notice:c.notice, preferences:c.preferences, canApprove:c.canApprove,
     device:{connected:device.connected, ready:protocol.ready && keysReady && !remapping, keysReady, error:deviceError},
-    inputMode:'Direct USB', demo, modelLabel:modelLabel(c.row,c.snapshot),effortLabel:effortLabel(c.row?.settings?.effort),canChooseModel:c.canChooseModel,...visual()}; }
+    inputMode:'Direct USB', demo, comfyConnections:comfy.configs(), modelLabel:modelLabel(c.row,c.snapshot),effortLabel:effortLabel(c.row?.settings?.effort),canChooseModel:c.canChooseModel,...visual()}; }
   function publish() { if (win && !win.isDestroyed()) win.webContents.send('view', view()); }
   async function execute(intent?: Intent) {
-    if (!intent || c.busy || !backend) return;
+    if (!intent || c.busy) return;
+    if(intent.method==='comfy-focus'){
+      const url=comfy.url(String(intent.params.id));if(url)await shell.openExternal(url);return;
+    }
+    if(!backend)return;
     c.busy = true; publish();
-    try { c.update(await backend.request(intent.method, intent.params)); c.notice = intent.method==='configuration'?'Settings updated · next turn':'Action confirmed'; }
+    try { codexSnapshot=await backend.request(intent.method, intent.params);syncSnapshot(); c.notice = intent.method==='configuration'?'Settings updated · next turn':'Action confirmed'; }
     catch (e) { c.notice = String((e as Error).message); }
     finally { c.busy = false; publish(); }
   }
@@ -101,6 +120,37 @@ async function run() {
   ipcMain.handle('select', (_e,id) => { c.select(String(id)); publish(); });
   ipcMain.handle('back', () => { if (!c.busy) c.back(); publish(); });
   ipcMain.handle('control',(_e,name)=>control(name));
+  ipcMain.handle('comfy-save',(_e,value)=>{
+    if(demo||c.busy)throw Error('Connections cannot be changed right now.');
+    const config=connection(value),configs=comfy.configs(),index=configs.findIndex(x=>x.id===config.id);
+    if(index<0){if(configs.length>=8)throw Error('Up to eight connections are supported.');configs.push(config);}else configs[index]=config;
+    if(configs.some(x=>x.id!==config.id&&x.url===config.url))throw Error('That server URL is already connected.');
+    writeFileSync(comfyFile,JSON.stringify(configs,null,2));comfy.configure(configs);void comfy.tick();
+  });
+  ipcMain.handle('comfy-remove',(_e,id)=>{
+    if(demo||c.busy)throw Error('Connections cannot be changed right now.');
+    const configs=comfy.configs().filter(x=>x.id!==id);
+    writeFileSync(comfyFile,JSON.stringify(configs,null,2));comfy.configure(configs);
+  });
+  ipcMain.handle('comfy-test',(_e,value)=>comfy.test(value));
+  ipcMain.handle('comfy-helper',async()=>{
+    if(demo)return;
+    const result=await dialog.showOpenDialog(win,{title:'Select your ComfyUI folder (contains main.py and custom_nodes)',properties:['openDirectory']});
+    if(result.canceled)return 'Installation cancelled.';
+    const folder=result.filePaths[0];
+    if(!existsSync(join(folder,'main.py'))||!existsSync(join(folder,'server.py'))||!existsSync(join(folder,'custom_nodes')))throw Error('Select the ComfyUI folder containing main.py, server.py and custom_nodes.');
+    const destination=join(folder,'custom_nodes/pulsar_deck'),file=join(destination,'__init__.py');
+    const source=readFileSync(join(root,'comfyui/pulsar_deck/__init__.py'),'utf8');
+    if(existsSync(file)){
+      const previous=readFileSync(file,'utf8');
+      if(previous!==source){
+        if(!previous.startsWith('"""Optional read-only ComfyUI progress endpoint for Pulsar Codex Deck.'))throw Error('A different pulsar_deck extension already exists in this folder.');
+        writeFileSync(file+'.'+Date.now()+'.bak',previous);
+      }
+    }
+    mkdirSync(destination,{recursive:true});writeFileSync(file,source);
+    return 'Progress helper installed. Restart this ComfyUI instance to enable live node and step progress.';
+  });
   ipcMain.handle('mascot',(_e,value)=>{
     if(c.busy)return;
     c.setMascot(value);writeFileSync(preferenceFile,JSON.stringify(c.preferences));publish();
@@ -113,11 +163,12 @@ async function run() {
       buttons:['Install hooks','Cancel'],defaultId:0,cancelId:1});
     if(response.response!==0)return;
     c.busy=true;publish();
-    try{const snapshot=await backend.request('setup-hooks');c.update(snapshot);c.notice=snapshot.setup_message||'Hooks installed. Run /hooks in Codex to review and trust them.';}
+    try{const snapshot=await backend.request('setup-hooks');codexSnapshot=snapshot;syncSnapshot();c.notice=snapshot.setup_message||'Hooks installed. Run /hooks in Codex to review and trust them.';}
     catch(e){c.notice=String((e as Error).message);}
     finally{c.busy=false;publish();}
   });
   ipcMain.handle('action', (_e,verb) => {
+    if(verb==='image'){if(c.row?.comfy?.latest&&!c.busy){c.page='image';c.displayedApproval=null;}publish();return;}
     if(verb==='model'){c.openConfiguration();publish();return;}
     if (verb === 'review') { if (c.row?.review && !c.busy) { c.page='details';c.cursor=0; } publish(); return; }
     if (verb === 'settings') { if (c.row?.settings && !c.busy) { c.page='settings'; c.cursor=0; } publish(); return; }
@@ -154,12 +205,14 @@ async function run() {
     if(existsSync(quitFile)){unlinkSync(quitFile);app.quit();return;}
     if (!backend || polling || c.busy || quitting) return;
     polling=true;
-    try { c.update(await backend.request('refresh')); }
-    catch(e) { c.update({...c.snapshot,connected:false,error:String((e as Error).message),rows:c.snapshot.rows.map(r=>({...r,actions:[],control_token:'-',settings:undefined,settings_token:undefined}))}); }
+    try { codexSnapshot=await backend.request('refresh');syncSnapshot(); }
+    catch(e) { codexSnapshot={...codexSnapshot,connected:false,error:String((e as Error).message),rows:codexSnapshot.rows.map(r=>({...r,actions:[],control_token:'-',settings:undefined,settings_token:undefined}))};syncSnapshot(); }
     finally { polling=false; publish(); }
   };
   void poll();
   const pollTimer = setInterval(()=>{void poll();},1000);
+  if(!demo)void comfy.tick();
+  const comfyTimer=setInterval(()=>{if(!demo&&!quitting)void comfy.tick();},1000);
   // Animation messages update only images, leaving buttons stable during clicks.
   let lastAnimation='';
   const animationTimer=setInterval(()=>{
@@ -201,7 +254,7 @@ async function run() {
       }
       const colors = c.snapshot.rows.some(r=>r.state==='waiting') ? [105,65,10] :
         c.snapshot.rows.some(r=>r.state==='error') ? [110,20,30] :
-        c.snapshot.rows.some(r=>r.state==='running') ? [15,50,110] : [15,75,55];
+        c.snapshot.rows.some(r=>r.state==='running'||r.state==='queued') ? [15,50,110] : [15,75,55];
       protocol.setLeds(Array.from({length:13},()=>({r:c.preferences.lights?colors[0]:0,g:c.preferences.lights?colors[1]:0,b:c.preferences.lights?colors[2]:0})));
       const sent=await protocol.drawLcdFrame(cachedFrame);
       if(row&&sent){const was=c.canApprove;c.markDisplayed(row.id,row.session_id,row.control_token);if(was!==c.canApprove)publish();}
@@ -211,7 +264,7 @@ async function run() {
   app.on('before-quit', e=>{
     if (quitting) return;
     e.preventDefault(); quitting=true;
-    clearInterval(pollTimer); clearInterval(drawTimer); clearInterval(buttonTimer);clearInterval(animationTimer);
+    clearInterval(pollTimer); clearInterval(drawTimer); clearInterval(buttonTimer);clearInterval(animationTimer);clearInterval(comfyTimer);comfy.close();
     void (async()=>{
       // Finish any in-flight LCD burst before restoring mappings.
       while(drawing || remapping || readingButtons) await new Promise(r=>setTimeout(r,20));

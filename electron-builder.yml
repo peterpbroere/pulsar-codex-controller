@@ -12,6 +12,7 @@ directories:
 files:
   - dist/**
   - ui/**
+  - comfyui/pulsar_deck/__init__.py
   - assets/mascots/v1/manifest.json
   - assets/mascots/v1/cat/**
   - assets/mascots/v1/owl/**
