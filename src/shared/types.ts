@@ -8,7 +8,7 @@ export interface ComfyStatus {
   latest?:ComfyImage; imageError?:string;
 }
 export interface Row {
-  id: string; session_id: string; label: string; state: string;
+  id: string; session_id: string; label: string; title?:string; state: string;
   reason: string; detail: string; project: string;
   actions: string[]; control_token: string; review: string; control_hint: string;
   settings?: Record<string, any>; settings_token?: string;

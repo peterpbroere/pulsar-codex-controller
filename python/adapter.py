@@ -1,5 +1,6 @@
 """Standalone session integration and exact-request controls over private stdio."""
 import argparse
+from collections import Counter
 import hashlib
 import json
 import logging
@@ -29,6 +30,20 @@ def effective_settings(value):
     return settings
 
 
+def session_title(value):
+    return ' '.join(value.split()) if isinstance(value, str) else ''
+
+
+def label_sessions(rows, titles):
+    for row in rows:
+        row['title'] = titles.get(row['session_id'], '')
+        row['label'] = row['title'] or row.get('name') or row.get('automatic_name') or row['label']
+    counts = Counter(row['label'].casefold() for row in rows)
+    for row in rows:
+        if counts[row['label'].casefold()] > 1:
+            row['label'] = row['id'][:4] + ' ' + row['label']
+
+
 class Adapter:
     def __init__(self, root=None, store=None):
         if root:
@@ -47,10 +62,17 @@ class Adapter:
         self.settings_errors = {}
         self.settings_at = 0
         self.models, self.models_error, self.models_at = [], "", 0
+        self.titles, self.titles_at, self.titles_rpc = {}, {}, None
         self.original_message = self.controls._message
         self.controls._message = self.message
 
     def message(self, message):
+        if message.get('method') == 'thread/name/updated':
+            params = message.get('params', {})
+            thread = params.get('threadId')
+            if isinstance(thread, str) and thread:
+                self.titles[thread] = session_title(params.get('threadName'))
+                self.titles_at[thread] = time.monotonic() + 30
         if message.get("method") == "thread/settings/updated":
             p = message["params"]
             value = p["threadSettings"]
@@ -75,6 +97,8 @@ class Adapter:
         rows = self.deck.view(limit=None)
         self.controls.sync(rows)
         self.controls.decorate(rows)
+        self.read_titles(rows)
+        label_sessions(rows, self.titles)
         if self.controls.connected:
             try:
                 self.read_models()
@@ -109,6 +133,37 @@ class Adapter:
         return {"rows": rows, "connected": self.controls.connected, "error": self.controls.error, 'diagnostics': diagnostics(),
                 "store": str(self.reader.path), "models": self.models, "models_error": self.models_error,
                 "models_token": fingerprint(self.models) if self.models and not self.models_error else None}
+
+    def read_titles(self, rows):
+        present = {row['session_id'] for row in rows}
+        for thread in (self.titles.keys() | self.titles_at.keys()) - present:
+            self.titles.pop(thread, None)
+            self.titles_at.pop(thread, None)
+        if not self.controls.connected:
+            self.titles_rpc = None
+            return
+        if self.titles_rpc is not self.controls.rpc:
+            self.titles_at.clear()
+            self.titles_rpc = self.controls.rpc
+        remaining = 4
+        for row in rows:
+            thread = row['session_id']
+            if time.monotonic() < self.titles_at.get(thread, 0):
+                continue
+            if not remaining:
+                break
+            remaining -= 1
+            self.titles_at[thread] = time.monotonic() + 30
+            previous = self.titles.get(thread)
+            try:
+                metadata = self.controls.rpc.request('thread/read', {'threadId': thread, 'includeTurns': False}, timeout=2)['thread']
+                if metadata.get('id') != thread:
+                    raise ValueError('Thread metadata did not match the requested session')
+                # A rename notification received during the read is newer than the response.
+                if self.titles.get(thread) == previous:
+                    self.titles[thread] = session_title(metadata.get('name'))
+            except Exception:
+                pass  # Retain the last known title; metadata failure must not disable controls.
 
     def handle(self, method, params):
         if method == 'setup-hooks':

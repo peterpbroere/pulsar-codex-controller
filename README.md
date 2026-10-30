@@ -8,6 +8,13 @@ Turn a **Pulsar Lab XPAD Mini** into a physical controller for your Codex agents
 Browse agents with the knob, see what needs attention on the LCD, and approve
 the selected request with a single key press.
 
+Codex entries use the existing **session title** as their main label on the pad
+and PC. Untitled sessions fall back to their existing name or project directory.
+The working directory stays visible in the PC details. Long titles are shortened
+on the pad; the PC panel shows the full label. Duplicate labels get a short ID
+prefix. Titles are read from Codex metadata and update when renamed; Pulsar does
+not generate titles or rename sessions.
+
 **Windows x64 · public preview · no custom firmware required**
 
 ### Desk companions
