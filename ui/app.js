@@ -50,7 +50,7 @@ window.deck.onAnimation(animate);
 $('mascot-choice').onchange=e=>perform(()=>window.deck.mascot(e.target.value));
 $('connect-codex').onclick=()=>perform(()=>window.deck.setup());
 let editingComfyId;
-function editComfy(config){editingComfyId=config?.id;$('comfy-title').textContent=config?'Edit ComfyUI connection':'Add ComfyUI connection';$('comfy-name').value=config?.name||'';$('comfy-url').value=config?.url||'';$('comfy-result').textContent='';$('comfy-dialog').showModal();$('comfy-name').focus();}
+function editComfy(config){editingComfyId=config?.id;$('comfy-title').textContent=config?'Edit ComfyUI connection':'Add ComfyUI connection';$('comfy-name').value=config?.name||'';$('comfy-url').value=config?.url||'';$('comfy-result').textContent='';$('delete-comfy').hidden=!config;$('comfy-dialog').showModal();$('comfy-name').focus();}
 const comfyValue=()=>({id:editingComfyId,name:$('comfy-name').value,url:$('comfy-url').value});
 $('add-comfy').onclick=()=>editComfy();
 $('edit-comfy').onclick=()=>editComfy(current.comfyConnections.find(c=>'comfy:'+c.id===current.selected));
@@ -58,4 +58,6 @@ $('close-comfy').onclick=()=>$('comfy-dialog').close();
 $('comfy-form').onsubmit=async e=>{e.preventDefault();$('save-comfy').disabled=true;try{await window.deck.comfySave(comfyValue());$('comfy-dialog').close();}catch(e){$('comfy-result').textContent=e.message;}finally{$('save-comfy').disabled=false;}};
 $('test-comfy').onclick=async()=>{$('test-comfy').disabled=true;$('comfy-result').textContent='Connecting…';try{$('comfy-result').textContent=await window.deck.comfyTest(comfyValue());}catch(e){$('comfy-result').textContent='Connection failed: '+e.message;}finally{$('test-comfy').disabled=false;}};
 $('helper-comfy').onclick=async()=>{$('helper-comfy').disabled=true;try{$('comfy-result').textContent=await window.deck.comfyHelper();}catch(e){$('comfy-result').textContent=e.message;}finally{$('helper-comfy').disabled=false;}};
-$('remove-comfy').onclick=()=>perform(async()=>{const config=current.comfyConnections.find(c=>'comfy:'+c.id===current.selected);if(config&&confirm(`Remove ${config.name} from the deck? ComfyUI itself will keep running.`))await window.deck.comfyRemove(config.id);});
+async function removeComfy(id){const config=current.comfyConnections.find(c=>c.id===id);if(config&&confirm(`Remove ${config.name} from the deck? ComfyUI itself will keep running.`)){await window.deck.comfyRemove(config.id);$('comfy-dialog').close();}}
+$('remove-comfy').onclick=()=>perform(()=>removeComfy(current.selected.replace(/^comfy:/,'')));
+$('delete-comfy').onclick=async()=>{try{await removeComfy(editingComfyId);}catch(e){$('comfy-result').textContent=e.message;}};

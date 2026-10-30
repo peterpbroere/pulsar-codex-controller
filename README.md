@@ -59,7 +59,7 @@ number of pending jobs. **Key 2** opens the selected ComfyUI server on the PC.
 Offline ComfyUI connections are hidden from the pad and its entry count. They
 reappear automatically when connected. If the selected connection goes offline,
 the pad switches to an available entry. Offline connections remain in the PC
-app; click one to edit its settings.
+app; click one to edit its settings or remove the connection.
 **Key 1** retains its approval meaning and has no action on ComfyUI entries.
 **Key 3** includes ComfyUI failures in its attention cycle. Queued jobs do not
 count as requests for human attention.
