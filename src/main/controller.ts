@@ -44,11 +44,16 @@ export class Controller {
   update(snapshot: Snapshot) {
     const old = this.row;
     this.snapshot = snapshot;
-    if (!snapshot.rows.some(r => r.id === this.selected)) { this.selected = snapshot.rows[0]?.id ?? ''; this.back(); }
+    if (!this.rows.some(r => r.id === this.selected)) {
+      const selected=this.rows[0]?.id??'';
+      if(this.selected!==selected){this.selected=selected;this.back();}
+    }
     else if (old?.control_token !== this.row?.control_token) this.displayedApproval = null;
   }
-  get row() { return this.snapshot.rows.find(r => r.id === this.selected); }
-  get attention() { return this.snapshot.rows.filter(r => r.state === 'waiting' || r.state === 'error'); }
+  // Keep every connection in the desktop snapshot, but only online ComfyUI entries on the pad.
+  get rows() { return this.snapshot.rows.filter(r=>r.source!=='comfyui'||r.comfy?.connected===true); }
+  get row() { return this.rows.find(r => r.id === this.selected); }
+  get attention() { return this.rows.filter(r => r.state === 'waiting' || r.state === 'error'); }
   get modelChoices() { return this.snapshot.models??[]; }
   get effortChoices() { return this.configurationDraft?.model.efforts??[]; }
   get canChooseModel() { return !!this.row?.settings_token&&!!this.snapshot.models_token&&this.modelChoices.length>0; }
@@ -82,7 +87,7 @@ export class Controller {
     ...(this.row?.actions.includes('continue') ? ['Continue'] : []), 'Global settings', 'Back']; }
   get globalMenu() { return [`Screen brightness: ${this.preferences.brightness}%`, `Status lights: ${this.preferences.lights ? 'On' : 'Off'}`, `Mascot: ${this.preferences.mascot==='cat'?'Cat':this.preferences.mascot==='owl'?'Owl':'Off'}`, 'Close settings']; }
   back() { this.page = 'agent'; this.cursor = 0; this.scroll = 0; this.confirm = null; this.configurationDraft=null;this.displayedApproval = null; }
-  select(id: string) { if (this.busy) return; if (this.snapshot.rows.some(r => r.id === id)) { this.selected = id; this.back(); } }
+  select(id: string) { if (this.busy) return; if (this.rows.some(r => r.id === id)) { this.selected = id; this.back(); } }
   action(verb: string, row = this.row): Intent | undefined {
     if (!row || !row.actions.includes(verb)) return;
     if(row.source==='comfyui')return verb==='focus'?{method:'comfy-focus',params:{id:row.id}}:undefined;
@@ -106,7 +111,7 @@ export class Controller {
     }
     if (key === 1) return this.action('focus');
     if (key === 2) {
-      const rows = this.snapshot.rows, start = rows.findIndex(r => r.id === this.selected);
+      const rows = this.rows, start = rows.findIndex(r => r.id === this.selected);
       for (let step = 1; step <= rows.length; step++) {
         const r = rows[(start + step) % rows.length];
         if (r.state === 'waiting' || r.state === 'error') { this.select(r.id); return; }
@@ -118,12 +123,11 @@ export class Controller {
     if (this.busy || !direction) return;
     this.notice = '';
     const delta = direction > 0 ? 1 : -1;
-    if (this.page === 'agent') {
-      const rows = this.snapshot.rows; if (!rows.length) return;
+    if (this.page === 'agent'||this.page==='image') {
+      const rows = this.rows; if (!rows.length) return;
       const index = rows.findIndex(r => r.id === this.selected);
       this.select(rows[(index + delta + rows.length) % rows.length].id);
-    } else if(this.page==='image')this.select(this.snapshot.rows[(this.snapshot.rows.findIndex(r=>r.id===this.selected)+delta+this.snapshot.rows.length)%this.snapshot.rows.length]?.id??'');
-    else if (this.page === 'details') this.cursor = (this.cursor + delta + this.menu.length) % this.menu.length;
+    } else if (this.page === 'details') this.cursor = (this.cursor + delta + this.menu.length) % this.menu.length;
     else if (this.page === 'settings') this.cursor = (this.cursor + delta + MODES.length + 1) % (MODES.length + 1);
     else if (this.page === 'model'||this.page==='effort') this.cursor=(this.cursor+delta+this.pickerLabels.length)%this.pickerLabels.length;
     else if (this.page === 'global') this.cursor = (this.cursor + delta + this.globalMenu.length) % this.globalMenu.length;

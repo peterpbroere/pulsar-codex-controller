@@ -54,8 +54,12 @@ The URL can include a reverse-proxy path; authenticated servers are not supporte
 in this version. Connections are saved locally and reconnect automatically.
 
 Turn the knob to browse ComfyUI entries alongside Codex agents. Each shows
-whether it is idle, queued, generating, finished, failed or offline, plus the
+whether it is idle, queued, generating, finished or failed, plus the
 number of pending jobs. **Key 2** opens the selected ComfyUI server on the PC.
+Offline ComfyUI connections are hidden from the pad and its entry count. They
+reappear automatically when connected. If the selected connection goes offline,
+the pad switches to an available entry. Offline connections remain in the PC
+app; click one to edit its settings.
 **Key 1** retains its approval meaning and has no action on ComfyUI entries.
 **Key 3** includes ComfyUI failures in its attention cycle. Queued jobs do not
 count as requests for human attention.
@@ -63,8 +67,9 @@ count as requests for human attention.
 The latest completed image appears as a thumbnail on the pad and a larger image
 in the PC app. **Press the knob → Latest image → press** for a larger pad view;
 **×** returns to the overview. The PC app also has a **View image on pad** button.
-Images are fitted without cropping, and stay visible while another job runs or
-the server is offline. A failed image download keeps the previous image. These
+Images are fitted without cropping and stay visible while another job runs.
+The last image is retained in memory while offline and is available again when
+the connection returns to the pad. A failed image download keeps the previous image. These
 are completed results, rather than live intermediate sampling previews.
 
 Queue and image monitoring use ComfyUI's built-in read-only HTTP endpoints;

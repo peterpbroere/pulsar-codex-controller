@@ -11,7 +11,7 @@ export function wrap(s:string,width:number) {
   }if(line)result.push(line);}return result;
 }
 export function displaySvg(c:Controller,mascotImage?:string):string {
-  const row=c.row,selected=c.snapshot.rows.findIndex(r=>r.id===c.selected),waiting=row?.state==='waiting';
+  const row=c.row,selected=c.rows.findIndex(r=>r.id===c.selected),waiting=row?.state==='waiting';
   const color=waiting?'#ffc76b':row?.state==='error'?'#ff8295':row?.state==='running'||row?.state==='queued'?'#8fbaff':row?.state==='offline'?'#8797a9':'#7ed9bd';
   const text=(x:number,y:number,s:string,fill='#edf2f7',size=11,weight=400,anchor='start')=>`<text x="${x}" y="${y}" fill="${fill}" font-size="${size}" font-weight="${weight}" text-anchor="${anchor}">${esc(s)}</text>`;
   let body='',top='',footer='';
@@ -19,7 +19,7 @@ export function displaySvg(c:Controller,mascotImage?:string):string {
   for(let i=0;i<3;i++)footer+=`<rect x="${i*80+3}" y="114" width="74" height="18" rx="4" fill="${buttons[i][2]?'#203043':'#141f2b'}"/>`+text(i*80+8,126,String(buttons[i][0]),buttons[i][2]?'#7ed9bd':'#526275',8,600)+text(i*80+20,126,String(buttons[i][1]),buttons[i][2]?'#eef3f8':'#526275',8,600);
   if(c.page==='agent'){
     const configuration=row?.source==='comfyui'?'COMFYUI':row?`${clip(modelLabel(row,c.snapshot),20)} · ${effortLabel(row.settings?.effort)}`:'CODEX';
-    top=`<svg x="9" y="0" width="150" height="18" overflow="hidden">${text(0,13,configuration,'#9eafc3',8,600)}</svg>`+text(231,13,`${Math.max(0,selected+1)} / ${c.snapshot.rows.length}   ·   ${c.attention.length} WAIT`,'#9cacc0',8,500,'end');
+    top=`<svg x="9" y="0" width="150" height="18" overflow="hidden">${text(0,13,configuration,'#9eafc3',8,600)}</svg>`+text(231,13,`${Math.max(0,selected+1)} / ${c.rows.length}   ·   ${c.attention.length} WAIT`,'#9cacc0',8,500,'end');
     if(row?.comfy){
       const comfy=row.comfy,hasImage=!!comfy.latest;
       body+=text(9,35,clip(row.label,24),'#fff',17,650)+`<circle cx="13" cy="49" r="3" fill="${color}"/>`+text(21,53,row.reason.toUpperCase(),color,9,650)+text(231,53,`${comfy.pending} QUEUED`,'#9cacc0',9,500,'end');
