@@ -70,6 +70,28 @@
         ],
         "frameDirectory": "cat/error",
         "preview": "cat-error.gif"
+      },
+      "voice-listening": {
+        "frames": 4,
+        "delayMs": [
+          420,
+          320,
+          160,
+          420
+        ],
+        "frameDirectory": "cat/voice-listening",
+        "preview": "cat-voice-listening.gif"
+      },
+      "voice-speaking": {
+        "frames": 4,
+        "delayMs": [
+          160,
+          180,
+          140,
+          180
+        ],
+        "frameDirectory": "cat/voice-speaking",
+        "preview": "cat-voice-speaking.gif"
       }
     },
     "owl": {
@@ -137,6 +159,28 @@
         ],
         "frameDirectory": "owl/error",
         "preview": "owl-error.gif"
+      },
+      "voice-listening": {
+        "frames": 4,
+        "delayMs": [
+          420,
+          320,
+          160,
+          420
+        ],
+        "frameDirectory": "owl/voice-listening",
+        "preview": "owl-voice-listening.gif"
+      },
+      "voice-speaking": {
+        "frames": 4,
+        "delayMs": [
+          160,
+          180,
+          140,
+          180
+        ],
+        "frameDirectory": "owl/voice-speaking",
+        "preview": "owl-voice-speaking.gif"
       }
     }
   }

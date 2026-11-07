@@ -61,6 +61,7 @@ test('native spoken replies are displayed as text without overwriting the user t
  const event=(role,part,value)=>f.voice.event({event:'voice',voice_id:id,method:'thread/realtime/transcript/'+part,params:{threadId:row.session_id,role,[part==='done'?'text':'delta']:value}});
  event('user','done','Run the checks.');event('assistant','delta','Ready');event('assistant','done','Ready.');
  assert.equal(f.voice.status.transcript,'Run the checks.');assert.equal(f.voice.status.reply,'Ready.');
- event('user','delta','Next prompt');assert.equal(f.voice.status.transcript,'Next prompt');
+ assert.ok(f.voice.status.speakingUntil>Date.now());
+ event('user','delta','Next prompt');assert.equal(f.voice.status.transcript,'Next prompt');assert.equal(f.voice.status.speakingUntil,0);
  await f.voice.stop();
 });

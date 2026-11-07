@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import type { Row, Snapshot } from '../shared/types';
+import type { Row, Snapshot, VoiceStatus } from '../shared/types';
 
 export const MASCOT_CHOICES = ['cat', 'owl', 'off'] as const;
 export type MascotChoice = typeof MASCOT_CHOICES[number];
-export type MascotState = 'idle' | 'working' | 'approval' | 'done' | 'error';
-const STATES: MascotState[] = ['idle','working','approval','done','error'];
+export type MascotState = 'idle' | 'working' | 'approval' | 'done' | 'error' | 'voice-listening' | 'voice-speaking';
+const STATES: MascotState[] = ['idle','working','approval','done','error','voice-listening','voice-speaking'];
 export const isMascotChoice = (value:unknown): value is MascotChoice => MASCOT_CHOICES.includes(value as MascotChoice);
 type Clip = { images:string[]; delayMs:number[] };
 export interface MascotFrame { choice:Exclude<MascotChoice,'off'>; state:MascotState; index:number; image:string }
@@ -48,12 +48,14 @@ export class MascotPlayer {
     }
     for(const id of this.previous.keys())if(!present.has(id)){this.previous.delete(id);this.finished.delete(id);}
   }
-  frame(choice:MascotChoice,row?:Row,connected=true,now=Date.now()):MascotFrame|null {
+  frame(choice:MascotChoice,row?:Row,connected=true,now=Date.now(),voice?:VoiceStatus):MascotFrame|null {
     if(choice==='off'){this.phaseKey='';return null;}
-    const state:MascotState=!connected||!row?'idle':row.state==='waiting'?'approval':row.state==='error'?'error':row.state==='running'?'working':(this.finished.get(row.session_id)??0)>now?'done':'idle';
+    let state:MascotState=!connected||!row?'idle':row.state==='waiting'?'approval':row.state==='error'?'error':row.state==='running'?'working':(this.finished.get(row.session_id)??0)>now?'done':'idle';
+    if(connected&&row&&voice?.phase==='active'&&voice.target?.sessionId===row.session_id)
+      state=typeof voice.speakingUntil==='number'&&voice.speakingUntil>now?'voice-speaking':'voice-listening';
     const key=`${choice}:${row?.session_id??''}:${state}`;
     if(key!==this.phaseKey){this.phaseKey=key;this.phaseStart=now;}
-    const clip=this.clips[choice]?.[state];if(!clip)return null;
+    const clip=this.clips[choice]?.[state];if(!clip||!clip.images.length)return null;
     let elapsed=Math.max(0,now-this.phaseStart)%clip.delayMs.reduce((a,b)=>a+b,0),index=0;
     while(index<clip.delayMs.length-1&&elapsed>=clip.delayMs[index])elapsed-=clip.delayMs[index++];
     return {choice,state,index,image:clip.images[index]};

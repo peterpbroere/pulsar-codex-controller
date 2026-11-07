@@ -73,7 +73,7 @@ async function run() {
     }
   }catch(e){c.notice='Could not load ComfyUI connections: '+String((e as Error).message);}
   let mascots:MascotPlayer|null=null;
-  try{mascots=await MascotPlayer.load(root);}catch(e){console.error('[mascot]',e);c.notice='Mascot artwork unavailable. Reinstall the app to restore it.';}
+  try{mascots=await MascotPlayer.load(root);}catch(e){console.error('[mascot]',e);c.notice='Companion artwork unavailable. Reinstall the app to restore it.';}
   if (demo) c.update({connected: false, error:'Demo — no real agent controls',
     models:[{id:'gpt-6.1-sol',label:'GPT-6.1-Sol',efforts:['low','medium','high','xhigh','max','ultra'],defaultEffort:'low'},{id:'gpt-6-luna',label:'GPT-6-Luna',efforts:['low','medium','high','xhigh','max'],defaultEffort:'medium'}],models_token:'demo-catalog',rows: [
     {id:'demo1', session_id:'demo1', label:'API service', state:'waiting', reason:'Approval needed', detail:'Run unit tests?', project:'C:\\dev\\example', actions:[], control_token:'-', review:'Command:\nnpm test\nDirectory:\nC:\\dev\\example', control_hint:'Demo',settings:{model:'gpt-6.1-sol',effort:'high',approvalPolicy:'on-request',sandboxPolicy:{type:'workspaceWrite'}},settings_token:'demo-settings-1'},
@@ -83,7 +83,7 @@ async function run() {
 
   function visual() {
     mascots?.observe({...c.snapshot,connected:c.snapshot.connected||demo||c.snapshot.rows.some(r=>r.comfy?.connected)});
-    const mascot=mascots?.frame(c.preferences.mascot,c.row,c.row?.comfy?c.row.comfy.connected:c.snapshot.connected||demo)??null;
+    const mascot=mascots?.frame(c.preferences.mascot,c.row,c.row?.comfy?c.row.comfy.connected:c.snapshot.connected||demo,Date.now(),c.voice)??null;
     const titleFrame=c.page==='agent'&&c.row?titles.frame(c.row.id,c.row.label):undefined;
     if(!titleFrame)titles.reset();
     return {svg:displaySvg(c,mascot?.image,titleFrame),mascot};

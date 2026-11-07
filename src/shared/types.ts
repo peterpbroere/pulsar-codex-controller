@@ -27,4 +27,5 @@ export interface VoiceStatus {
   error?:string;
   transcript?:string;
   reply?:string;
+  speakingUntil?:number;
 }

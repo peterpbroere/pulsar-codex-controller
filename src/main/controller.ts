@@ -41,7 +41,7 @@ export class Controller {
     if(typeof p.voiceName==='string'&&/^[a-z0-9_-]{0,64}$/.test(p.voiceName))this.preferences.voiceName=p.voiceName;
   }
   setMascot(value:unknown) {
-    if(!isMascotChoice(value))throw new Error('Unknown mascot');
+    if(!isMascotChoice(value))throw new Error('Unknown companion');
     this.preferences.mascot=value;
   }
   private returnPage: Page = 'agent';
@@ -98,7 +98,7 @@ export class Controller {
     ...(this.row?.actions.includes('reject') ? ['Reject request'] : []),
     ...(this.row?.actions.includes('stop') ? ['Stop turn'] : []),
     ...(this.row?.actions.includes('continue') ? ['Continue'] : []), 'Global settings', 'Back']; }
-  get globalMenu() { return [`Screen brightness: ${this.preferences.brightness}%`, `Status lights: ${this.preferences.lights ? 'On' : 'Off'}`, `Mascot: ${this.preferences.mascot==='cat'?'Cat':this.preferences.mascot==='owl'?'Owl':'Off'}`, `Spoken replies: ${this.preferences.spokenReplies?'On':'Off'}`, `Voice: ${this.preferences.voiceName||'Codex default'}`, 'Close settings']; }
+  get globalMenu() { return [`Screen brightness: ${this.preferences.brightness}%`, `Status lights: ${this.preferences.lights ? 'On' : 'Off'}`, `Companion: ${this.preferences.mascot==='cat'?'Cat':this.preferences.mascot==='owl'?'Owl':'Off'}`, `Spoken replies: ${this.preferences.spokenReplies?'On':'Off'}`, `Voice: ${this.preferences.voiceName||'Codex default'}`, 'Close settings']; }
   back() { this.page = 'agent'; this.cursor = 0; this.scroll = 0; this.confirm = null; this.configurationDraft=null;this.displayedApproval = null; }
   select(id: string) { if (this.busy) return; if (this.rows.some(r => r.id === id)) { this.selected = id; this.back(); } }
   action(verb: string, row = this.row): Intent | undefined {

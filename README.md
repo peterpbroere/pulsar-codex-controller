@@ -20,15 +20,21 @@ not generate titles or rename sessions.
 
 **Windows x64 · public preview · no custom firmware required**
 
-### Desk companions
+### Companion
 
-Choose **Cat**, **Owl**, or **Off** using the PC app's Mascot selector, or press
-**+ → Mascot** on the pad and press the knob to cycle the choices. Your choice
-is saved automatically. Both original pixel-art companions animate while an
-agent works, waits for input, rests, or reports an error. After an observed turn
-ends, a short finish animation plays before the companion rests.
+Choose **Cat**, **Owl**, or **Off** using the PC app's Companion selector, or press
+**+ → Companion** on the pad and press the knob to cycle the choices. Your choice
+is saved automatically. The cat and owl animate while an agent works, waits for
+input, rests, or reports an error. After an observed turn ends, a short finish
+animation plays before the companion rests.
 
-The mascot sits beside the activity preview. Press the knob for full details;
+During an active native voice session, the selected voice target's cat or owl
+shows a listening animation, then a speaking animation when native assistant
+transcript activity indicates a reply. These are animated conversation states,
+not audio-volume lip sync. **Off** remains off. Voice animations do not change
+agent status or approval state.
+
+The companion sits beside the activity preview. Press the knob for full details;
 choose Off for the wider text preview. Colors and approval controls still show
 the actual agent state independently of the animation.
 

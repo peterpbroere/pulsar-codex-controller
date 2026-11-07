@@ -1,7 +1,9 @@
 // Mechanical atlas slicing, alignment and GIF encoding. Art is generated separately.
 const fs=require('node:fs'),path=require('node:path'),sharp=require('sharp');
 const root=path.resolve(__dirname,'../assets/mascots/v1');
-const states=['idle','working','approval','done','error'];
+const atlasStates=['idle','working','approval','done','error'];
+const voiceStates=['voice-listening','voice-speaking'];
+const stateOrder=[...atlasStates,...voiceStates];
 const specs={cat:{rows:[0,237,472,714,933,1145],omit:{working:[4]}},owl:{rows:[0,248,478,733,937,1145],omit:{}}};
 const size=64,zoom=3;
 const delays={idle:[440,360,340,440,360,500],working:[150,150,180,150,180,150],approval:[400,250,300,300,200,450],done:[240,180,180,240,260,350],error:[450,300,350,450,300,450]};
@@ -11,13 +13,33 @@ async function gif(frames,file,delay){
  await sharp(Buffer.concat(raws),{raw:{width:meta.width,height:meta.height*frames.length,channels:4,pageHeight:meta.height}})
   .gif({loop:0,delay,colours:256,dither:0,effort:7}).toFile(file);
 }
+function manifestStates(manifest){
+ const present=new Set(Object.values(manifest.mascots||{}).flatMap(states=>Object.keys(states||{})));
+ return stateOrder.filter(state=>present.has(state));
+}
+async function loadManifestFrames(manifest,name,state){
+ const entry=manifest.mascots?.[name]?.[state];
+ if(!entry||!Number.isInteger(entry.frames)||entry.frames<1||!Array.isArray(entry.delayMs)||entry.delayMs.length!==entry.frames||!entry.frameDirectory)
+  throw Error(`Missing or invalid frame metadata for ${name}/${state}`);
+ const large=[];
+ for(let i=0;i<entry.frames;i++){
+  const frame=await sharp(path.join(root,entry.frameDirectory,`${i}.png`)).png().toBuffer();
+  large.push(await sharp(frame).resize(size*zoom,size*zoom,{kernel:'nearest'}).png().toBuffer());
+ }
+ await gif(large,path.join(root,`${name}-${state}.gif`),entry.delayMs);
+ return large;
+}
 async function run(){
- fs.mkdirSync(root,{recursive:true});const animations={},manifest={version:1,nativeFrameSize:[size,size],previewScale:zoom,mascots:{}};
- for(const [name,spec] of Object.entries(specs)){
+ const previewsOnly=process.argv.includes('--previews-only'),manifestPath=path.join(root,'manifest.json');
+ const manifest=fs.existsSync(manifestPath)?JSON.parse(fs.readFileSync(manifestPath,'utf8')):{version:1,nativeFrameSize:[size,size],previewScale:zoom,mascots:{}};
+ manifest.mascots||={};const animations={};
+ const voiceAvailable=voiceStates.filter(state=>Object.keys(specs).every(name=>manifest.mascots[name]?.[state]));
+ const states=previewsOnly?manifestStates(manifest):[...atlasStates,...voiceAvailable];
+ if(!previewsOnly)for(const [name,spec] of Object.entries(specs)){
   const {data,info}=await sharp(path.join(root,'sources',`${name}-atlas.png`)).ensureAlpha().raw().toBuffer({resolveWithObject:true});
-  animations[name]={};manifest.mascots[name]={};
-  for(let row=0;row<5;row++){
-   const state=states[row],top=spec.rows[row],bottom=spec.rows[row+1],cuts=[0];
+  animations[name]={};manifest.mascots[name]||={};
+  for(let row=0;row<atlasStates.length;row++){
+   const state=atlasStates[row],top=spec.rows[row],bottom=spec.rows[row+1],cuts=[0];
    for(let col=1;col<6;col++){
     const expected=Math.round(info.width*col/6);let best=expected,cost=Infinity;
     for(let x=expected-10;x<=expected+10;x++){
@@ -58,25 +80,29 @@ async function run(){
    manifest.mascots[name][state]={frames:cells.length,delayMs:timing,frameDirectory:`${name}/${state}`,preview:`${name}-${state}.gif`};
   }
  }
- const previewFrames=[],review=[];
- // 90 frames closes both the five-frame typing cycle and all six-frame cycles.
+ for(const name of Object.keys(specs)){
+  animations[name]||={};
+  for(const state of states)if(!animations[name][state])animations[name][state]=await loadManifestFrames(manifest,name,state);
+ }
+ const previewFrames=[],review=[],previewWidth=states.length*208;
+ // Keep the gallery loop long enough for each included animation to advance.
  for(let t=0;t<90;t++){
   const composites=[];
   for(const [r,name] of ['cat','owl'].entries())for(const [col,state] of states.entries()){
    const frames=animations[name][state],pace=state==='working'?1:state==='done'?2:3;
    composites.push({input:frames[Math.floor(t/pace)%frames.length],left:col*208+8,top:r*224+48});
   }
-  const labels=`<svg width="1040" height="496"><style>text{font-family:Segoe UI,sans-serif;fill:#bacbd8;font-size:15px;letter-spacing:1px}</style>${states.map((s,i)=>`<text x="${i*208+104}" y="25" text-anchor="middle">${s.toUpperCase()}</text>`).join('')}<text x="12" y="53" font-size="11">CAT</text><text x="12" y="277" font-size="11">OWL</text></svg>`;
+  const labels=`<svg width="${previewWidth}" height="496"><style>text{font-family:Segoe UI,sans-serif;fill:#bacbd8;font-size:15px;letter-spacing:1px}</style>${states.map((s,i)=>`<text x="${i*208+104}" y="25" text-anchor="middle">${s.toUpperCase()}</text>`).join('')}<text x="12" y="53" font-size="11">CAT</text><text x="12" y="277" font-size="11">OWL</text></svg>`;
   composites.push({input:Buffer.from(labels),left:0,top:0});
-  const frame=await sharp({create:{width:1040,height:496,channels:4,background:'#101925'}}).composite(composites).png().toBuffer();
+  const frame=await sharp({create:{width:previewWidth,height:496,channels:4,background:'#101925'}}).composite(composites).png().toBuffer();
   previewFrames.push(frame);if([0,6,12].includes(t))review.push(frame);
  }
  await gif(previewFrames,path.join(root,'preview.gif'),180);
  fs.writeFileSync(path.join(root,'preview-still.png'),previewFrames[0]);
- await sharp({create:{width:1040,height:496*review.length,channels:4,background:'#101925'}}).composite(review.map((input,i)=>({input,left:0,top:i*496}))).png().toFile(path.join(root,'review-frames.png'));
- fs.writeFileSync(path.join(root,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
+ await sharp({create:{width:previewWidth,height:496*review.length,channels:4,background:'#101925'}}).composite(review.map((input,i)=>({input,left:0,top:i*496}))).png().toFile(path.join(root,'review-frames.png'));
+ if(!previewsOnly)fs.writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\n');
  const links=states.map(s=>`<section><h2>${s}</h2><div><figure><img src="cat-${s}.gif"><figcaption>Cat</figcaption></figure><figure><img src="owl-${s}.gif"><figcaption>Owl</figcaption></figure></div></section>`).join('');
- fs.writeFileSync(path.join(root,'preview.html'),`<!doctype html><meta charset="utf-8"><title>Desk companions — animation concepts</title><style>body{font-family:Segoe UI,sans-serif;background:#101925;color:#dce8ef;margin:36px auto;max-width:1060px}h1{font-size:24px}main{display:flex;gap:12px;flex-wrap:wrap}section{background:#182535;border-radius:12px;padding:12px}h2{text-transform:capitalize;font-size:15px;text-align:center}section div{display:flex}figure{margin:0}img{width:192px;height:192px;image-rendering:pixelated}figcaption{text-align:center;color:#9bb3c4;font-size:13px}p{color:#9bb3c4}</style><h1>Desk companions</h1><p>First animation concepts · original tuxedo cat and little owl</p><main>${links}</main>`);
- console.log(JSON.stringify({output:root,animations:10,nativeFrameSize:size,manifest},null,2));
+ fs.writeFileSync(path.join(root,'preview.html'),`<!doctype html><meta charset="utf-8"><title>Companion animation preview</title><style>body{font-family:Segoe UI,sans-serif;background:#101925;color:#dce8ef;margin:36px auto;max-width:${previewWidth+16}px}h1{font-size:24px}main{display:flex;gap:12px;flex-wrap:wrap}section{background:#182535;border-radius:12px;padding:12px}h2{text-transform:capitalize;font-size:15px;text-align:center}section div{display:flex}figure{margin:0}img{width:192px;height:192px;image-rendering:pixelated}figcaption{text-align:center;color:#9bb3c4;font-size:13px}p{color:#9bb3c4}</style><h1>Companion animation preview</h1><p>Cat and owl state previews</p><main>${links}</main>`);
+ console.log(JSON.stringify({output:root,animations:Object.values(animations).reduce((n,states)=>n+Object.keys(states).length,0),nativeFrameSize:size,previewsOnly},null,2));
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});

@@ -55,10 +55,10 @@ export class VoiceSession {
     if(message.method==='thread/realtime/transcript/delta'||message.method==='thread/realtime/transcript/done'){
       const done=message.method.endsWith('/done');
       if(p.role==='user'){
-        this.publish({transcript:(done?String(p.text??''):((this.transcriptComplete?'':this.status.transcript??'')+String(p.delta??''))).slice(-2000)});
+        this.publish({transcript:(done?String(p.text??''):((this.transcriptComplete?'':this.status.transcript??'')+String(p.delta??''))).slice(-2000),speakingUntil:0});
         this.transcriptComplete=done;
       }else if(p.role==='assistant'){
-        this.publish({reply:(done?String(p.text??''):((this.replyComplete?'':this.status.reply??'')+String(p.delta??''))).slice(-4000)});
+        this.publish({reply:(done?String(p.text??''):((this.replyComplete?'':this.status.reply??'')+String(p.delta??''))).slice(-4000),speakingUntil:Date.now()+1500});
         this.replyComplete=done;
       }
     }
