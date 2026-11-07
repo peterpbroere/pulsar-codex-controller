@@ -20,7 +20,7 @@ function render(v){
  $('setup-help').textContent=diagnostics&&!diagnostics.codex_installed?'Install Codex CLI, sign in with codex login, then restart this app.':diagnostics?.hooks_configured?'Hooks found. In Codex, run /hooks to review/trust them, then start or resume a session and send a prompt.':'Connect Codex to install the session-status hooks. Existing hooks are backed up and preserved.';
  animate(v);$('mascot-choice').value=v.preferences.mascot;$('mascot-choice').disabled=v.busy;
  const list=$('sessions');list.replaceChildren();
- for(const r of v.snapshot.rows){const offline=r.source==='comfyui'&&!r.comfy?.connected;const b=document.createElement('button');b.className='session'+(r.id===v.selected?' selected':'');b.disabled=v.busy;const name=document.createElement('strong');name.textContent=r.label;const state=document.createElement('span');state.textContent=(r.source==='comfyui'?'COMFYUI':'CODEX')+' · '+r.reason+(offline?' · Edit connection':'');state.className=r.state;b.append(name,state);b.onclick=()=>offline?editComfy(v.comfyConnections.find(c=>'comfy:'+c.id===r.id)):perform(()=>window.deck.select(r.id));list.append(b);}
+  for(const r of v.snapshot.rows){const offline=(r.source==='comfyui'&&!r.comfy?.connected)||(r.source==='opencode'&&!r.opencode?.connected);const b=document.createElement('button');b.className='session'+(r.id===v.selected?' selected':'');b.disabled=v.busy;const name=document.createElement('strong');name.textContent=r.label;const state=document.createElement('span');state.textContent=(r.source==='comfyui'?'COMFYUI':r.source==='opencode'?'OPENCODE':'CODEX')+' · '+r.reason+(offline&&r.source==='comfyui'?' · Edit connection':'');state.className=r.state;b.onclick=()=>offline&&r.source==='comfyui'?editComfy(v.comfyConnections.find(c=>'comfy:'+c.id===r.id)):perform(()=>window.deck.select(r.id));b.append(name,state);list.append(b);}
  if(!v.snapshot.rows.length){const p=document.createElement('p');p.className='empty';p.textContent='Your participating Codex sessions appear here after their first prompt. Use Connect Codex to set up session discovery.';list.append(p);}
  const r=v.snapshot.rows.find(r=>r.id===v.selected);
  const voice=v.voice||{phase:'idle'};
@@ -48,7 +48,7 @@ function render(v){
  $('key3').title='Tap to toggle voice; hold for 700 ms to jump to next attention';
  $('name').textContent=r?.label||'No sessions yet';$('project').textContent=r?.project||'';$('reason').textContent=r?.reason||'';
  if(r?.comfy?.running){const p=r.comfy,percent=x=>x?Math.round(x.value/x.max*100)+'%':'—';$('reason').textContent=`${r.reason}\nTotal: ${percent(p.total)}\n${p.node||'Current node'}: ${percent(p.progress)}`;}
- $('model-effort').textContent=r?.comfy?`${r.comfy.running} running · ${r.comfy.pending} queued`:r?`Model: ${v.modelLabel} · Effort: ${v.effortLabel}`:'';
+  $('model-effort').textContent=r?.source==='opencode'?(r.opencode?.model?`Model: ${v.modelLabel}`:'Model: not reported yet'):r?.comfy?`${r.comfy.running} running · ${r.comfy.pending} queued`:r?`Model: ${v.modelLabel} · Effort: ${v.effortLabel}`:'';
  const actions=$('actions');actions.replaceChildren();
  for(const [verb,label] of [['focus','Open on PC'],['stop','Stop turn'],['continue','Continue']]) if(r?.actions.includes(verb)) actions.append(button(label,verb,!v.busy));
  if(r?.review)actions.append(button(r.comfy?'Activity':'Review request','review',!v.busy));
@@ -58,7 +58,7 @@ function render(v){
  const latest=r?.comfy?.latest;$('generation').hidden=!latest;
  if(latest){if($('generation-image').getAttribute('src')!==latest.image)$('generation-image').src=latest.image;$('generation-caption').textContent='Latest completed image · '+latest.filename+(r.comfy.connected?'':' · offline');}
  $('comfy-management').hidden=!r?.comfy;$('edit-comfy').disabled=v.busy;$('remove-comfy').disabled=v.busy;$('add-comfy').disabled=v.busy||v.demo;
- const settings=r?.settings;$('settings').textContent=settings?`Approval: ${typeof settings.approvalPolicy==='string'?settings.approvalPolicy:JSON.stringify(settings.approvalPolicy)} · Sandbox: ${settings.sandboxPolicy?.type}\nChanges apply to subsequent turns.`:r?.settings_error||r?.control_hint||'';
+  const settings=r?.settings;$('settings').textContent=r?.source==='opencode'&&settings?`Permission: ${settings.mode??'Custom'}\nChanges apply to this session's subsequent turns.`:settings?`Approval: ${typeof settings.approvalPolicy==='string'?settings.approvalPolicy:JSON.stringify(settings.approvalPolicy)} · Sandbox: ${settings.sandboxPolicy?.type}\nChanges apply to subsequent turns.`:r?.settings_error||r?.control_hint||'';
  if(r?.comfy?.imageError)$('settings').textContent+='\n'+r.comfy.imageError;
  $('review-panel').hidden=v.page!=='details'||!v.review?.review;$('review').textContent=v.review?.review||'';
  $('review-title').textContent=r?.comfy?'Generation activity':'Pending request';$('approval-actions').hidden=!!r?.comfy;

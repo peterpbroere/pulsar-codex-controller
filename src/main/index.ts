@@ -10,6 +10,7 @@ import { AUXILIARY_BUTTONS, ButtonEdges } from './device/button-input';
 import { DirectInput } from './device/direct-input';
 import { MascotPlayer } from './mascot';
 import { ComfyMonitor, connection } from './comfyui';
+import { OpenCodeMonitor } from './opencode';
 import { Snapshot } from '../shared/types';
 import { TitleScroller } from './title-scroll';
 import { PressGesture } from './device/press-gesture';
@@ -61,7 +62,8 @@ async function run() {
   await audio.setPlayback(c.preferences.spokenReplies);
   const comfyFile=join(stateDir,'comfyui.json');
   let codexSnapshot:Snapshot=c.snapshot;
-  function syncSnapshot(){c.update({...codexSnapshot,rows:[...codexSnapshot.rows,...comfy.rows()]});}
+  const opencode=new OpenCodeMonitor(()=>{syncSnapshot();publish();});
+  function syncSnapshot(){c.update({...codexSnapshot,rows:[...codexSnapshot.rows,...comfy.rows(),...opencode.rows()]});}
   const comfy=new ComfyMonitor(()=>{syncSnapshot();publish();});
   try{
     if(existsSync(comfyFile)){
@@ -79,6 +81,7 @@ async function run() {
     {id:'demo1', session_id:'demo1', label:'API service', state:'waiting', reason:'Approval needed', detail:'Run unit tests?', project:'C:\\dev\\example', actions:[], control_token:'-', review:'Command:\nnpm test\nDirectory:\nC:\\dev\\example', control_hint:'Demo',settings:{model:'gpt-6.1-sol',effort:'high',approvalPolicy:'on-request',sandboxPolicy:{type:'workspaceWrite'}},settings_token:'demo-settings-1'},
     {id:'demo2', session_id:'demo2', label:'Unit tests', state:'running', reason:'Working', detail:'', project:'C:\\dev\\example', actions:[], control_token:'-', review:'', control_hint:'Demo',settings:{model:'gpt-6-luna',effort:'medium',approvalPolicy:'on-request',sandboxPolicy:{type:'workspaceWrite'}},settings_token:'demo-settings-2'},
     {id:'demo3', session_id:'demo3', label:'Documentation', state:'idle', reason:'Turn stopped', detail:'', project:'C:\\dev\\example', actions:[], control_token:'-', review:'', control_hint:'Demo',settings:{model:'gpt-6.1-sol',effort:'medium',approvalPolicy:'on-request',sandboxPolicy:{type:'workspaceWrite'}},settings_token:'demo-settings-3'},
+    {id:'demo4', session_id:'ses_demo4', label:'Refactor billing', state:'waiting', reason:'Approval needed', detail:'', project:'C:\\dev\\shop', actions:['approve','reject','stop','focus'], control_token:'per_demo', review:'Edit request\nsrc/billing/invoice.ts\nRewrite tax calculation', control_hint:'OpenCode 1.19.2 · http://127.0.0.1:4096', source:'opencode', opencode:{connected:true,url:'http://127.0.0.1:4096',port:4096,version:'1.19.2',model:'anthropic/claude-sonnet-4-5',modelVariant:'thinking'}},
   ]});
 
   function visual() {
@@ -89,7 +92,7 @@ async function run() {
     return {svg:displaySvg(c,mascot?.image,titleFrame),mascot};
   }
   function view() { return {snapshot:c.snapshot, selected:c.selected, page:c.page, cursor:c.cursor,
-    voice:c.voice,voiceChoices:c.voiceChoices,canStartVoice:!!backend&&!demo&&c.snapshot.connected&&!!c.row?.settings_token&&c.row?.source!=='comfyui'&&!c.busy,
+    voice:c.voice,voiceChoices:c.voiceChoices,canStartVoice:!!backend&&!demo&&c.snapshot.connected&&!!c.row?.settings_token&&c.row?.source!=='comfyui'&&c.row?.source!=='opencode'&&!c.busy,
     menu:c.menu, review:c.row, confirmation:c.confirm, busy:c.busy, notice:c.notice, preferences:c.preferences, canApprove:c.canApprove,
     device:{connected:device.connected, ready:protocol.ready && keysReady && !remapping, keysReady, error:deviceError},
     inputMode:'Direct USB', demo, comfyConnections:comfy.configs(), modelLabel:modelLabel(c.row,c.snapshot),effortLabel:effortLabel(c.row?.settings?.effort),canChooseModel:c.canChooseModel,...visual()}; }
@@ -102,6 +105,24 @@ async function run() {
     if(c.busy)return;
     if(intent.method==='comfy-focus'){
       const url=comfy.url(String(intent.params.id));if(url)await shell.openExternal(url);return;
+    }
+    if(intent.method==='opencode-action'){
+      if(demo)return;
+      const id=String(intent.params.id),verb=String(intent.params.verb),token=String(intent.params.token);
+      if(verb==='focus'){await opencode.action(id,verb,token);return;}
+      c.busy=true;publish();
+      try{await opencode.action(id,verb,token);syncSnapshot();c.notice='Action confirmed';}
+      catch(e){c.notice=String((e as Error).message);}
+      finally{c.busy=false;publish();}
+      return;
+    }
+    if(intent.method==='opencode-settings'){
+      if(demo)return;
+      c.busy=true;publish();
+      try{await opencode.setPermission(String(intent.params.id),String(intent.params.mode),String(intent.params.token));syncSnapshot();c.notice='Permission mode updated · subsequent turns';}
+      catch(e){c.notice=String((e as Error).message);}
+      finally{c.busy=false;publish();}
+      return;
     }
     if(!backend)return;
     c.busy = true; publish();
@@ -269,6 +290,8 @@ async function run() {
   const gestureTimer=setInterval(()=>{key3Gesture.tick().forEach(key3Event);desktopKey3Gesture.tick().forEach(key3Event);},25);
   if(!demo)void comfy.tick();
   const comfyTimer=setInterval(()=>{if(!demo&&!quitting)void comfy.tick();},1000);
+  if(!demo)void opencode.tick();
+  const opencodeTimer=setInterval(()=>{if(!demo&&!quitting)void opencode.tick();},1000);
   // Animation messages update only images, leaving buttons stable during clicks.
   let lastAnimation='';
   const animationTimer=setInterval(()=>{
@@ -321,6 +344,7 @@ async function run() {
     if (quitting) return;
     e.preventDefault(); quitting=true;
     clearInterval(pollTimer); clearInterval(drawTimer); clearInterval(buttonTimer);clearInterval(animationTimer);clearInterval(comfyTimer);comfy.close();
+    clearInterval(opencodeTimer);opencode.close();
     clearInterval(gestureTimer);key3Gesture.reset();desktopKey3Gesture.reset();
     void (async()=>{
       await voice.stop();await audio.close();

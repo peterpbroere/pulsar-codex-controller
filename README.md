@@ -118,6 +118,44 @@ Use **Edit connection** or **Remove connection** in the selected entry's PC pane
 to manage it. Removing an entry does not stop ComfyUI or change its queue. This
 version monitors existing jobs; it does not launch or cancel generations.
 
+### OpenCode sessions
+
+Running [OpenCode](https://opencode.ai) TUI windows on this PC appear alongside
+Codex agents automatically — Pulsar finds each window's local server by
+inspecting listening ports, verifies it with OpenCode's health endpoint, and
+shows its sessions. No hooks, extensions, or configuration are required; close
+a window and its entries leave the pad on the next scan. Headless `opencode
+run` processes host no server and are never shown.
+
+**Start the TUI with a port** so it hosts the server Pulsar monitors:
+`opencode --port 4096`. On OpenCode 1.19.2 a TUI started without `--port`
+binds no server and cannot be detected or attached to; use a distinct port per
+window (4096, 4097, …).
+
+Entries use the OpenCode session title (falling back to the project folder) and
+show the session's current model — for example `claude-sonnet-4-5 · thinking` —
+in the pad's top line and the PC panel, read from the session itself.
+
+- **Key 1** approves the shown permission request once, using its exact
+  request ID; **× → Reject request** refuses it. Requests resolved elsewhere
+  are refused as stale.
+- **Key 2** opens a terminal running `opencode attach` against that server, so
+  you can watch and steer the same session from a TUI.
+- The knob menu offers **Stop turn** (abort) while the agent works and
+  **Continue** to send a Continue prompt when it is idle.
+- Errors and automatic retries turn the entry red; a pending permission request
+  always takes priority in amber.
+
+Session permission questions, structured answers, and model choice stay in the
+OpenCode TUI: Pulsar displays the model in use but does not change it, and
+there is no voice for OpenCode entries. Up to the 12 most recently updated
+sessions per window are listed; sessions idle for more than 24 hours stay off
+the deck (busy, retrying, or approval-pending sessions always show). The
+server API exposes all recorded sessions across projects, so without this rule
+long-finished history would appear as idle agents. Discovery is local to this
+PC; remote servers are not monitored in this version. OpenCode's server API is
+experimental and versions may require changes — tested with OpenCode 1.19.2.
+
 ## Download and get started
 
 1. **[Download the latest Windows release](https://github.com/peterpbroere/pulsar-codex-controller/releases).**
@@ -150,6 +188,7 @@ SHA256 hash with `SHA256SUMS.txt` from the same release.
 - Change the selected session's permission preset for subsequent turns.
 - Adjust display brightness and switch status lighting on/off.
 - Monitor multiple ComfyUI servers and view their latest generated images.
+- Browse and control local OpenCode TUI sessions: approve permission requests, stop, or continue.
 
 ## Physical controls
 
@@ -233,6 +272,14 @@ policies are displayed as **Custom** rather than silently labeled Auto.
 Permission changes can be constrained by Codex or organization policy. Full
 access deliberately removes Codex's sandbox and approval prompts. These presets
 are distinct from any other controller's automatic approval feature.
+
+The same four presets are available for **OpenCode** entries: they patch the
+selected session's server-side permission ruleset (edit/bash/external-directory
+rules), and the pad and PC panel read the session's ruleset back and label it
+— including **Custom** when the ruleset does not match a preset. Verified
+against OpenCode 1.19.2: preset `ask` rules override allow-defaults, `deny`
+rules block silently without an ask, and the readback reflects what OpenCode
+actually stored.
 
 ## Requirements and current coverage
 

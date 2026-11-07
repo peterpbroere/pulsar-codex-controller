@@ -7,12 +7,16 @@ export interface ComfyStatus {
   node:string; progress?:{value:number;max:number}; total?:{value:number;max:number}; helper:boolean;
   latest?:ComfyImage; imageError?:string;
 }
+export interface OpenCodeStatus {
+  connected:boolean; url:string; port:number; version:string;
+  model?:string; modelVariant?:string;
+}
 export interface Row {
   id: string; session_id: string; label: string; title?:string; state: string;
   reason: string; detail: string; project: string;
   actions: string[]; control_token: string; review: string; control_hint: string;
   settings?: Record<string, any>; settings_token?: string;
-  source?:'comfyui'; comfy?:ComfyStatus;
+  source?:'comfyui'|'opencode'; comfy?:ComfyStatus; opencode?:OpenCodeStatus;
 }
 export interface Snapshot {
   voices?:string[]; voices_error?:string;

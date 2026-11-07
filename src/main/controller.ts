@@ -1,5 +1,6 @@
 import { Row, Snapshot, ModelChoice, VoiceStatus } from '../shared/types';
 import { isMascotChoice, MascotChoice } from './mascot';
+import { openCodeModelLabel } from './opencode';
 export const MODES = ['Read-only', 'Auto', 'No prompts', 'YOLO / Full access'];
 export type Page = 'agent' | 'details' | 'image' | 'settings' | 'model' | 'effort' | 'confirm' | 'global' | 'voice';
 export interface Intent { method: string; params: Record<string, any> }
@@ -9,6 +10,7 @@ export function effortLabel(value:unknown):string {
   return value==='xhigh'?'XHigh':value[0].toUpperCase()+value.slice(1);
 }
 export function modelLabel(row:Row|undefined,snapshot:Snapshot):string {
+  if(row?.source==='opencode')return openCodeModelLabel(row.opencode);
   const model=row?.settings?.model;
   return snapshot.models?.find(m=>m.id===model)?.label||model||'Model unknown';
 }
@@ -49,15 +51,25 @@ export class Controller {
   update(snapshot: Snapshot) {
     const old = this.row;
     this.snapshot = snapshot;
-    if (!this.rows.some(r => r.id === this.selected)) {
+    // Selection survives offline OpenCode entries (their outage is shown), but a
+    // connection going offline still falls back like before.
+    const current = this.snapshot.rows.find(r => r.id === this.selected);
+    const retained = !!current && !(current.source==='comfyui' && current.comfy?.connected!==true);
+    if (!retained) {
       const selected=this.rows[0]?.id??'';
       if(this.selected!==selected){this.selected=selected;this.back();}
     }
     else if (old?.control_token !== this.row?.control_token) this.displayedApproval = null;
   }
-  // Keep every connection in the desktop snapshot, but only online ComfyUI entries on the pad.
-  get rows() { return this.snapshot.rows.filter(r=>r.source!=='comfyui'||r.comfy?.connected===true); }
-  get row() { return this.rows.find(r => r.id === this.selected); }
+  // Keep every connection in the desktop snapshot, but only online ComfyUI/OpenCode entries on the pad.
+  get rows() {
+    return this.snapshot.rows.filter(r=>{
+      if(r.source==='comfyui')return r.comfy?.connected===true;
+      if(r.source==='opencode')return r.opencode?.connected===true;
+      return true;
+    });
+  }
+  get row() { return this.snapshot.rows.find(r => r.id === this.selected); }
   get attention() { return this.rows.filter(r => r.state === 'waiting' || r.state === 'error'); }
   get modelChoices() { return this.snapshot.models??[]; }
   get effortChoices() { return this.configurationDraft?.model.efforts??[]; }
@@ -67,7 +79,7 @@ export class Controller {
     this.preferences.voiceName=name;
     this.notice='Voice saved · next session';
   }
-  get canChooseModel() { return !!this.row?.settings_token&&!!this.snapshot.models_token&&this.modelChoices.length>0; }
+  get canChooseModel() { return this.row?.source!=='opencode'&&!!this.row?.settings_token&&!!this.snapshot.models_token&&this.modelChoices.length>0; }
   get pickerLabels() {
     if(this.page==='voice')return [...this.voiceDraftChoices.map(v=>v?v[0].toUpperCase()+v.slice(1):'Codex default'),'Back'];
     return [...(this.page==='model'?this.modelChoices.map(m=>m.label+(m.id===this.row?.settings?.model?' · current':'')):
@@ -100,10 +112,18 @@ export class Controller {
     ...(this.row?.actions.includes('continue') ? ['Continue'] : []), 'Global settings', 'Back']; }
   get globalMenu() { return [`Screen brightness: ${this.preferences.brightness}%`, `Status lights: ${this.preferences.lights ? 'On' : 'Off'}`, `Companion: ${this.preferences.mascot==='cat'?'Cat':this.preferences.mascot==='owl'?'Owl':'Off'}`, `Spoken replies: ${this.preferences.spokenReplies?'On':'Off'}`, `Voice: ${this.preferences.voiceName||'Codex default'}`, 'Close settings']; }
   back() { this.page = 'agent'; this.cursor = 0; this.scroll = 0; this.confirm = null; this.configurationDraft=null;this.displayedApproval = null; }
-  select(id: string) { if (this.busy) return; if (this.rows.some(r => r.id === id)) { this.selected = id; this.back(); } }
+  select(id: string) {
+    if (this.busy) return;
+    const row=this.snapshot.rows.find(r=>r.id===id);
+    if(!row)return;
+    // Offline ComfyUI connections stay editor-only; offline OpenCode entries can be inspected.
+    if(row.source==='comfyui'&&row.comfy?.connected!==true)return;
+    this.selected = id; this.back();
+  }
   action(verb: string, row = this.row): Intent | undefined {
     if (!row || !row.actions.includes(verb)) return;
     if(row.source==='comfyui')return verb==='focus'?{method:'comfy-focus',params:{id:row.id}}:undefined;
+    if(row.source==='opencode')return {method:'opencode-action',params:{id:row.id,session_id:row.session_id,verb,token:row.control_token}};
     return {method: 'action', params: {id: row.id, session_id: row.session_id, verb, token: row.control_token}};
   }
   markDisplayed(id: string, session: string, token: string) {
@@ -162,7 +182,7 @@ export class Controller {
       if(entry==='Latest image'){this.page='image';this.displayedApproval=null;}
       else if (entry === 'Activity / request') { this.scroll += 3; }
       else if (entry === 'Global settings') this.toggleGlobal();
-      else if (entry === 'Permission mode') { this.page = 'settings'; this.cursor = Math.max(0,MODES.indexOf(modeLabel(this.row?.settings))); }
+      else if (entry === 'Permission mode') { this.page = 'settings'; this.cursor = Math.max(0,MODES.indexOf(this.row?.source==='opencode'?String(this.row?.settings?.mode??''):modeLabel(this.row?.settings))); }
       else if(entry==='Model & Effort')this.openConfiguration();
       else if (entry === 'Stop turn' || entry === 'Continue' || entry === 'Reject request') { this.back(); return this.action(entry === 'Stop turn' ? 'stop' : entry === 'Continue' ? 'continue' : 'reject'); }
       else if (entry === 'Back') this.back();
@@ -186,7 +206,10 @@ export class Controller {
       }
     } else if (this.page === 'confirm') {
       const confirmation = this.confirm; this.back();
-      if(confirmation?.kind==='permission')return {method:'settings', params:{id:confirmation.row.id, session_id:confirmation.row.session_id, mode:confirmation.mode, token:confirmation.row.settings_token}};
+      if(confirmation?.kind==='permission'){
+        if(confirmation.row.source==='opencode')return {method:'opencode-settings', params:{id:confirmation.row.id, session_id:confirmation.row.session_id, mode:confirmation.mode, token:confirmation.row.settings_token}};
+        return {method:'settings', params:{id:confirmation.row.id, session_id:confirmation.row.session_id, mode:confirmation.mode, token:confirmation.row.settings_token}};
+      }
       if(confirmation)return {method:'configuration',params:{id:confirmation.row.id,session_id:confirmation.row.session_id,kind:confirmation.kind,model:confirmation.model,effort:confirmation.effort,token:confirmation.row.settings_token,catalog_token:confirmation.catalogToken}};
     } else if (this.page === 'global') {
       if (this.cursor === 0) this.preferences.brightness = this.preferences.brightness >= 100 ? 25 : Math.min(100,this.preferences.brightness+15);

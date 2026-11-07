@@ -16,7 +16,7 @@ export class VoiceSession {
   get running(){return this.current!==null;}
   async toggle(row:Row|undefined,connected:boolean,device='',voiceName=''){
     if(this.current){await this.stop();return;}
-    if(!connected||!row||row.source==='comfyui'||!row.session_id||!row.settings_token){
+    if(!connected||!row||row.source==='comfyui'||row.source==='opencode'||!row.session_id||!row.settings_token){
       this.status={phase:'error',error:'Select a connected Codex agent to start voice.'};this.changed(this.status);return;
     }
     const op:Operation={id:randomUUID(),thread:row.session_id,cancelled:false,native:false};
