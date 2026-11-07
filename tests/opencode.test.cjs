@@ -60,7 +60,7 @@ function stubServer(initial={}) {
       else{res.writeHead(404);res.end('{}');}
     });
   });
-  return {state,emit,sseConnected,listen:()=>new Promise(resolve=>server.listen(0,'127.0.0.1',()=>resolve(server.address().port))),close:()=>new Promise(resolve=>server.close(resolve))};
+  return {state,emit,sseConnected,listen:()=>new Promise(resolve=>server.listen(0,'127.0.0.1',()=>resolve(server.address().port))),close:()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve)})};
 }
 const session=(id,extra={})=>({id,title:extra.title??`Session ${id}`,directory:extra.directory??`C:\\dev\\${id}`,time:{created:1,updated:extra.updated??Date.now()},...(extra.raw??{})});
 
@@ -96,6 +96,11 @@ test('discovers servers and maps sessions to rows',async()=>{
   const monitor=new OpenCodeMonitor(()=>{},()=>Date.now(),async()=>[{address:'127.0.0.1',port,pid:4242}]);
   try{
     await monitor.tick();
+    assert.equal(monitor.rows().length,0,'database history appeared without any activity');
+    await stub.sseConnected;
+    stub.emit('message.updated',{info:{sessionID:'s1'}});
+    stub.emit('message.updated',{info:{sessionID:'s2'}});
+    await new Promise(r=>setTimeout(r,60));
     const rows=monitor.rows();
     assert.equal(rows.length,2);
     const first=rows.find(r=>r.session_id==='s1');
@@ -130,6 +135,7 @@ test('permission requests wait, approve once, and reject stale tokens',async()=>
     assert.equal(row.review,'bash request\nnpm test\nRun tests');
     await monitor.action(row.id,'approve','per_1');
     assert.deepEqual(stub.state.posts.find(p=>p.path==='/permission/per_1/reply'),{path:'/permission/per_1/reply',body:{reply:'once'}});
+    stub.emit('message.updated',{info:{sessionID:'s1'}});
     await new Promise(r=>setTimeout(r,60));
     row=monitor.rows().find(r=>r.session_id==='s1');
     assert.equal(row.state,'running');
@@ -172,12 +178,15 @@ test('legacy requests resolved elsewhere disappear on the next poll',async()=>{
   const monitor=new OpenCodeMonitor(()=>{},()=>clock,async()=>[{address:'127.0.0.1',port,pid:4242}]);
   try{
     await monitor.tick();
+    await stub.sseConnected;
+    stub.emit('message.updated',{info:{sessionID:'s1'}});
+    await new Promise(r=>setTimeout(r,60));
     assert.equal(monitor.rows().find(r=>r.session_id==='s1').state,'waiting');
     stub.state.pending=stub.state.pending.filter(p=>p.id!=='per_7');
     clock+=2100;
     await monitor.tick();
     const row=monitor.rows().find(r=>r.session_id==='s1');
-    assert.equal(row.state,'idle');
+    assert.equal(row.state,'idle','worked-in session must stay after its request is resolved elsewhere');
     assert.deepEqual(row.actions,['continue','focus']);
   }finally{monitor.close();await stub.close();}
 });
@@ -189,6 +198,9 @@ test('reject replies with reject and stop aborts the running turn',async()=>{
   const monitor=new OpenCodeMonitor(()=>{},()=>clock,async()=>[{address:'127.0.0.1',port,pid:4242}]);
   try{
     await monitor.tick();
+    await stub.sseConnected;
+    stub.emit('message.updated',{info:{sessionID:'s1'}});
+    await new Promise(r=>setTimeout(r,60));
     let row=monitor.rows().find(r=>r.session_id==='s1');
     assert.equal(row.state,'waiting');
     await monitor.action(row.id,'reject','per_9');
@@ -235,6 +247,9 @@ test('v2 permissions pending before startup are discovered by polling',async()=>
     assert.equal(row.review,'edit request\nsrc/a.ts');
     await monitor.action(row.id,'approve','per_early');
     assert.deepEqual(stub.state.posts.find(p=>p.path==='/api/session/s1/permission/per_early/reply'),{path:'/api/session/s1/permission/per_early/reply',body:{reply:'once'}});
+    stub.emit('message.updated',{info:{sessionID:'s1'}});
+    await new Promise(r=>setTimeout(r,60));
+    assert.equal(monitor.rows().find(r=>r.session_id==='s1').state,'running');
   }finally{monitor.close();await stub.close();}
 });
 
@@ -267,8 +282,11 @@ test('session events respect the child and archived filters used by polling',asy
     await monitor.tick();
     await stub.sseConnected;
     stub.emit('session.updated',{info:{id:'kid',parentID:'s1',title:'subagent',directory:'C:\\dev\\x',time:{created:2,updated:Date.now()}}});
+    stub.emit('message.updated',{info:{sessionID:'kid'}});
     stub.emit('session.updated',{info:{id:'boxed',title:'archived',directory:'C:\\dev\\y',time:{created:2,updated:Date.now(),archived:3}}});
+    stub.emit('message.updated',{info:{sessionID:'boxed'}});
     stub.emit('session.updated',{info:{id:'s2',title:'New session',directory:'C:\\dev\\s2',model:{id:'gpt-5',providerID:'openai'},time:{created:2,updated:Date.now()+1000}}});
+    stub.emit('message.updated',{info:{sessionID:'s2'}});
     await new Promise(r=>setTimeout(r,60));
     const ids=monitor.rows().map(r=>r.session_id);
     assert.ok(!ids.includes('kid'),'child session leaked in via event');
@@ -300,7 +318,7 @@ test('offline OpenCode entries can be selected on the PC while staying out of pa
   assert.equal(c.selected,'agent','knob browsing skips offline entries');
 });
 
-test('stale history stays hidden until the session is live or recent',async()=>{
+test('stale history stays hidden until the session works in the window',async()=>{
   const stub=stubServer({sessions:[
     session('dust',{title:'Old greeting',updated:Date.now()-72*3600000}),
     session('live',{title:'Busy one',updated:Date.now()-72*3600000}),
@@ -310,22 +328,62 @@ test('stale history stays hidden until the session is live or recent',async()=>{
   const monitor=new OpenCodeMonitor(()=>{},()=>Date.now(),async()=>[{address:'127.0.0.1',port,pid:4242}]);
   try{
     await monitor.tick();
+    assert.equal(monitor.rows().length,0,'database history appeared without any activity');
+    await stub.sseConnected;
+    stub.emit('message.updated',{info:{sessionID:'live'}});
+    await new Promise(r=>setTimeout(r,60));
     const ids=monitor.rows().map(r=>r.session_id);
-    assert.ok(!ids.includes('dust'),'three-day-old idle session shown as a ready agent');
-    assert.ok(ids.includes('live'),'busy session hidden');
-    assert.ok(ids.includes('fresh'),'recent session hidden');
+    assert.deepEqual(ids,['live'],'activity alone must decide visibility, never recency');
   }finally{monitor.close();await stub.close();}
+});
+
+test('closing and reopening a window resets its session list',async()=>{
+  const stub=stubServer({sessions:[session('s1',{updated:Date.now()})],statuses:{}});
+  let port=await stub.listen();
+  let clock=Date.now();
+  const listener=async()=>[{address:'127.0.0.1',port,pid:4242}];
+  const monitor=new OpenCodeMonitor(()=>{},()=>clock,listener);
+  try{
+    await monitor.tick();
+    await stub.sseConnected;
+    stub.emit('message.updated',{info:{sessionID:'s1'}});
+    await new Promise(r=>setTimeout(r,60));
+    assert.equal(monitor.rows().length,1);
+    await stub.close();
+    port=-1;
+    clock+=11000;
+    await monitor.tick();
+    assert.equal(monitor.rows().length,0,'closing the window cleared its sessions');
+    // A new window in the same project: the database still knows session s1,
+    // but nothing worked in this window yet, so nothing may be listed.
+    const stub2=stubServer({sessions:[session('s1',{updated:Date.now()}),session('s2',{title:'Fresh work',updated:Date.now()})],statuses:{}});
+    port=await stub2.listen();
+    clock+=11000;
+    await monitor.tick();
+    assert.equal(monitor.rows().length,0,'a new window does not resurrect old sessions');
+    await stub2.sseConnected;
+    stub2.emit('session.created',{info:{id:'s2',title:'Fresh work',directory:'C:\\dev\\x',time:{created:2,updated:Date.now()}}});
+    await new Promise(r=>setTimeout(r,60));
+    await monitor.tick();
+    const rows=monitor.rows();
+    assert.equal(rows.length,1);
+    assert.equal(rows[0].session_id,'s2','the new window shows only its own new session');
+    await stub2.close();
+  }finally{monitor.close();}
 });
 
 test('the same session on two servers appears once, on the live instance',async()=>{
   const make=port=>stubServer({sessions:[session('shared',{title:'One session',updated:Date.now()})],statuses:{shared:{type:'busy'}}});
   const live=make(),dead=make();
   const livePort=await live.listen(),deadPort=await dead.listen();
-  // The second server also knows the session but has no live status for it.
+  // The second server also knows the session but has no live status or activity for it.
   dead.state.statuses={};
   const monitor=new OpenCodeMonitor(()=>{},()=>Date.now(),async()=>[{address:'127.0.0.1',port:livePort,pid:1},{address:'127.0.0.1',port:deadPort,pid:2}]);
   try{
     await monitor.tick();
+    await live.sseConnected;
+    live.emit('message.updated',{info:{sessionID:'shared'}});
+    await new Promise(r=>setTimeout(r,60));
     const rows=monitor.rows();
     const shared=rows.filter(r=>r.session_id==='shared');
     assert.equal(shared.length,1,'duplicate session rows across servers');
@@ -362,6 +420,9 @@ test('permission presets apply per session with honest readback',async()=>{
   const monitor=new OpenCodeMonitor(()=>{},()=>Date.now(),async()=>[{address:'127.0.0.1',port,pid:4242}]);
   try{
     await monitor.tick();
+    await stub.sseConnected;
+    stub.emit('message.updated',{info:{sessionID:'s1'}});
+    await new Promise(r=>setTimeout(r,60));
     const rowId=`oc:${port}:s1`;
     let row=monitor.rows().find(r=>r.session_id==='s1');
     assert.equal(row.settings.mode,'Auto');
@@ -399,19 +460,19 @@ test('opencode rows expose Permission mode but never Model & Effort',()=>{
 });
 
 test('controller routes opencode intents and shows model on the LCD',()=>{
-  const row={id:'oc:4096:s1',session_id:'s1',label:'Fix login bug',state:'waiting',reason:'Approval needed',detail:'',project:'C:\\dev\\app',actions:['approve','reject','stop','focus'],control_token:'per_1',review:'bash request\nnpm test',control_hint:'OpenCode 1.19.2 · http://127.0.0.1:4096',source:'opencode',opencode:{connected:true,url:'http://127.0.0.1:4096',port:4096,version:'1.19.2',model:'anthropic/claude-sonnet-4-5',modelVariant:'thinking'}};
+  const row={id:'oc:4096:s1',session_id:'s1',label:'Fix login bug',state:'waiting',reason:'Approval needed',detail:'',project:'C:\\dev\\app',actions:['approve','reject','stop','focus'],control_token:'per_1',review:'bash request\nnpm test',control_hint:'OpenCode 1.19.2 · http://127.0.0.1:4096',settings:{mode:'Read-only'},settings_token:'perm:4096:s1',source:'opencode',opencode:{connected:true,url:'http://127.0.0.1:4096',port:4096,version:'1.19.2',model:'anthropic/claude-sonnet-4-5'}};
   const c=new Controller();
   c.update({rows:[row],connected:false,error:''});
   assert.equal(c.row.id,row.id);
   assert.deepEqual(c.key(1),{method:'opencode-action',params:{id:row.id,session_id:'s1',verb:'focus',token:'per_1'}});
   c.markDisplayed('oc:4096:s1','s1','per_1');
   assert.deepEqual(c.key(0),{method:'opencode-action',params:{id:row.id,session_id:'s1',verb:'approve',token:'per_1'}});
-  assert.equal(modelLabel(row,{rows:[],connected:false,error:''}),'claude-sonnet-4-5 · thinking');
+  assert.equal(modelLabel(row,{rows:[],connected:false,error:''}),'claude-sonnet-4-5');
   assert.match(c.menu.join('|'),/Reject request/);
-  assert.doesNotMatch(c.menu.join('|'),/Model & Effort|Permission mode/);
+  assert.doesNotMatch(c.menu.join('|'),/Model & Effort/);
   const svg=displaySvg(c);
-  assert.match(svg,/claude-sonnet-4-5/);
-  assert.match(svg,/OPENCODE/);
+  assert.match(svg,/claude-sonnet-4-5 — OPENCODE/);
+  assert.match(svg,/Read-only/);
   assert.match(svg,/NEEDS YOU/);
   c.update({rows:[{...row,opencode:{...row.opencode,connected:false}}],connected:false,error:''});
   assert.equal(c.rows.length,0);

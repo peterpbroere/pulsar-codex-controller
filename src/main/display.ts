@@ -23,7 +23,11 @@ export function displaySvg(c:Controller,mascotImage?:string,titleFrame?:TitleFra
   const buttons=[['1','APPROVE',c.canApprove],['2','OPEN PC',row?.actions.includes('focus')],['3',voicePhase==='stopping'?'ENDING…':voiceActive?'END VOICE':'VOICE',voicePhase!=='idle'||c.attention.length>0||(c as Controller & {canStartVoice?:boolean}).canStartVoice===true]];
   for(let i=0;i<3;i++)footer+=`<rect x="${i*80+3}" y="114" width="74" height="18" rx="4" fill="${buttons[i][2]?'#203043':'#141f2b'}"/>`+text(i*80+8,126,String(buttons[i][0]),buttons[i][2]?'#7ed9bd':'#526275',8,600)+text(i*80+20,126,String(buttons[i][1]),buttons[i][2]?'#eef3f8':'#526275',8,600);
   if(c.page==='agent'){
-    const configuration=row?.source==='comfyui'?'COMFYUI':row?.source==='opencode'?clip(openCodeModelLabel(row.opencode),20):row?`${clip(modelLabel(row,c.snapshot),20)} · ${effortLabel(row.settings?.effort)}`:'CODEX';
+    let configuration:string;
+    if(row?.source==='comfyui')configuration='COMFYUI';
+    else if(row?.source==='opencode'){const model=openCodeModelLabel(row.opencode);configuration=model==='OPENCODE'?'OPENCODE':clip(`${model} — OPENCODE`,34);}
+    else if(row)configuration=clip(`${modelLabel(row,c.snapshot)} · ${effortLabel(row.settings?.effort)} — CODEX`,34);
+    else configuration='CODEX';
     top=`<svg x="9" y="0" width="150" height="18" overflow="hidden">${text(0,13,configuration,'#9eafc3',8,600)}</svg>`+text(231,13,`${Math.max(0,selected+1)} / ${c.rows.length}   ·   ${c.attention.length} WAIT`,'#9cacc0',8,500,'end');
     if(row?.comfy){
       const comfy=row.comfy,hasImage=!!comfy.latest;
@@ -42,7 +46,8 @@ export function displaySvg(c:Controller,mascotImage?:string,titleFrame?:TitleFra
       if(hasImage)body+=`<image x="145" y="58" width="87" height="44" preserveAspectRatio="xMidYMid meet" href="${esc(comfy.latest!.image)}"/>`;
       else if(mascotImage)body+=`<image x="184" y="56" width="48" height="48" href="${esc(mascotImage)}"/>`;
       body+=text(9,108,hasImage?'PRESS: latest image / details':'PRESS: details · + settings','#697f95',8);
-    }else if(row){body+=heading(row.label)+`<circle cx="13" cy="49" r="3" fill="${color}"/>`+text(21,53,waiting?'NEEDS YOU':row.state==='running'?'WORKING':row.state==='error'?'ERROR':row.state==='offline'?'OFFLINE':'READY',color,9,650)+text(231,53,row.source==='opencode'?'OPENCODE':modeLabel(row.settings),'#9cacc0',9,500,'end');
+    }else if(row){const modeText=row.source==='opencode'?String(row.settings?.mode??'Custom').replace('YOLO / Full access','Full access'):modeLabel(row.settings);
+      body+=heading(row.label)+`<circle cx="13" cy="49" r="3" fill="${color}"/>`+text(21,53,waiting?'NEEDS YOU':row.state==='running'?'WORKING':row.state==='error'?'ERROR':row.state==='offline'?'OFFLINE':'READY',color,9,650)+text(231,53,modeText,'#9cacc0',9,500,'end');
       const width=mascotImage?28:36;
       const voiceReply=c.voice.target?.id===row.id?c.voice.reply:'';
       const lines=wrap((row.review||voiceReply||row.detail||row.reason||'Ready for your next instruction').replace(/^Command:\s*/,''),width);

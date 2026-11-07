@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { basename } from 'node:path';
 import { OpenCodeStatus, Row } from '../shared/types';
 
-const HEALTH_TIMEOUT=4000, POLL_TIMEOUT=6000, SESSION_LIMIT=12, RESCAN_MS=10000, POLL_MS=2000, RETRY_MS=2000, ERROR_KEEP_MS=120000, RECENT_MS=24*3600*1000;
+const HEALTH_TIMEOUT=4000, POLL_TIMEOUT=6000, SESSION_LIMIT=12, RESCAN_MS=10000, POLL_MS=2000, RETRY_MS=2000, ERROR_KEEP_MS=120000;
 
 export interface Listener { address:string; port:number; pid:number }
 export function parseListeners(output:string, pids:Set<number>):Listener[] {
@@ -89,8 +89,8 @@ function childOrArchived(value:any):boolean {
   return !!(value.time&&value.time.archived!==undefined&&value.time.archived!==null);
 }
 interface ServerState {
-  url:string; port:number; pid:number; version:string; connected:boolean; failed:boolean; errorMessage:string;
-  sessions:Map<string,SessionState>; statuses:Map<string,any>; pending:Map<string,Pending>;
+  url:string; port:number; pid:number; version:string; directory:string; connected:boolean; failed:boolean; errorMessage:string;
+  sessions:Map<string,SessionState>; statuses:Map<string,any>; pending:Map<string,Pending>; seen:Set<string>;
   errors:Map<string,{message:string;at:number}>; activity:Map<string,string>;
   abort:AbortController; busy:boolean; nextPoll:number; streaming:boolean; sseRetry:number;
 }
@@ -128,14 +128,11 @@ export class OpenCodeMonitor {
   rows():Row[] {
     const out:Row[]=[];
     for(const server of [...this.servers.values()].sort((a,b)=>a.port-b.port)){
-      // The server API exposes every recorded session across all projects; only
-      // live or recently active ones belong on the deck. Dead history is clutter.
-      const sessions=[...server.sessions.values()].filter(s=>{
-        if([...server.pending.values()].some(p=>p.sessionID===s.id))return true;
-        const status=server.statuses.get(s.id);
-        if(status?.type==='busy'||status?.type==='retry')return true;
-        return s.updated>0&&this.now()-s.updated<RECENT_MS;
-      }).sort((a,b)=>b.updated-a.updated).slice(0,SESSION_LIMIT);
+      // A session belongs on the deck only if it did work in this window since the
+      // deck connected to it — never because it sits in the shared database history.
+      // Database ghosts from closed windows cannot appear: their events are gone.
+      const sessions=[...server.sessions.values()].filter(s=>server.seen.has(s.id)||[...server.pending.values()].some(p=>p.sessionID===s.id))
+        .sort((a,b)=>b.updated-a.updated).slice(0,SESSION_LIMIT);
       for(const session of sessions)out.push(this.rowFor(server,session));
     }
     return this.dedupe(out);
@@ -207,21 +204,27 @@ export class OpenCodeMonitor {
       try{
         const health=await request(url,'global/health',undefined,HEALTH_TIMEOUT) as any;
         if(health?.healthy!==true||typeof health.version!=='string')continue;
-        this.servers.set(listener.port,this.blankServer(url,listener.port,listener.pid,health.version));
+        const server=this.blankServer(url,listener.port,listener.pid,health.version);
+        this.servers.set(listener.port,server);
+        try{
+          const path=await request(url,'path',undefined,HEALTH_TIMEOUT) as any;
+          if(typeof path?.directory==='string')server.directory=path.directory;
+        }catch{}
       }catch{}
     }
     for(const [port,server] of this.servers)if(!live.has(port)){server.abort.abort();this.servers.delete(port);}
   }
   private blankServer(url:string,port:number,pid:number,version:string):ServerState {
-    return {url,port,pid,version,connected:false,failed:false,errorMessage:'',sessions:new Map(),statuses:new Map(),
-      pending:new Map(),errors:new Map(),activity:new Map(),abort:new AbortController(),busy:false,nextPoll:0,streaming:false,sseRetry:0};
+    return {url,port,pid,version,directory:'',connected:false,failed:false,errorMessage:'',sessions:new Map(),statuses:new Map(),
+      pending:new Map(),seen:new Set(),errors:new Map(),activity:new Map(),abort:new AbortController(),busy:false,nextPoll:0,streaming:false,sseRetry:0};
   }  private async poll(server:ServerState):Promise<void> {
     if(this.stopped||server.busy||this.now()<server.nextPoll)return;
     server.busy=true;
     const signal=server.abort.signal;
     try{
+      const sessionPath=server.directory?`session?directory=${encodeURIComponent(server.directory)}`:'session';
       const [sessions,statuses,pendings]=await Promise.all([
-        request(server.url,'session',{signal}) as Promise<any[]>,
+        request(server.url,sessionPath,{signal}) as Promise<any[]>,
         request(server.url,'session/status',{signal}) as Promise<Record<string,any>>,
         request(server.url,'permission',{signal}).catch(()=>undefined) as Promise<unknown>,
       ]);
@@ -333,7 +336,7 @@ export class OpenCodeMonitor {
     }
     else if(type==='permission.asked'||type==='permission.v2.asked'){
       const pending=normalizePending(properties);
-      if(pending)server.pending.set(pending.id,pending);
+      if(pending){server.pending.set(pending.id,pending);server.seen.add(pending.sessionID);}
     }
     else if(type==='permission.replied'||type==='permission.v2.replied'){
       const id=typeof properties.id==='string'?properties.id:typeof properties.requestID==='string'?properties.requestID:'';
@@ -348,14 +351,28 @@ export class OpenCodeMonitor {
         server.activity.delete(sessionID);
       }
     }
-    else if(type==='message.part.updated'){
-      const part=properties.part,sessionID=typeof part?.sessionID==='string'?part.sessionID:typeof properties.sessionID==='string'?properties.sessionID:'';
+    else if(type==='message.part.updated'||type==='message.part.delta'||type==='message.updated'){
+      const part=properties.part;
+      const sessionID=type==='message.updated'
+        ?(typeof properties.info?.sessionID==='string'?properties.info.sessionID:typeof properties.sessionID==='string'?properties.sessionID:'')
+        :(typeof part?.sessionID==='string'?part.sessionID:typeof properties.sessionID==='string'?properties.sessionID:'');
       if(!sessionID)return;
+      server.seen.add(sessionID);
       server.errors.delete(sessionID);
-      const tool=typeof part?.tool==='string'?part.tool:typeof part?.state?.title==='string'?part.state.title:'';
-      if(part?.type==='tool'&&tool)server.activity.set(sessionID,`Tool: ${tool.slice(0,40)}`);
+      if(type==='message.part.updated'){
+        const tool=typeof part?.tool==='string'?part.tool:typeof part?.state?.title==='string'?part.state.title:'';
+        if(part?.type==='tool'&&tool)server.activity.set(sessionID,`Tool: ${tool.slice(0,40)}`);
+      }
     }
-    if(type!=='message.part.updated')this.changed();
+    else if(type==='session.created'){
+      const id=typeof properties.info?.id==='string'?properties.info.id:'';
+      if(id)server.seen.add(id);
+    }
+    else if(type==='tui.session.select'){
+      const id=typeof properties.sessionID==='string'?properties.sessionID:'';
+      if(id)server.seen.add(id);
+    }
+    if(type!=='message.part.updated'&&type!=='message.part.delta')this.changed();
   }
   async action(rowId:string,verb:string,token:string):Promise<void> {
     const match=/^oc:(\d+):(.+)$/.exec(rowId);

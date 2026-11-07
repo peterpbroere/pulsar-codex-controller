@@ -123,9 +123,15 @@ version monitors existing jobs; it does not launch or cancel generations.
 Running [OpenCode](https://opencode.ai) TUI windows on this PC appear alongside
 Codex agents automatically — Pulsar finds each window's local server by
 inspecting listening ports, verifies it with OpenCode's health endpoint, and
-shows its sessions. No hooks, extensions, or configuration are required; close
-a window and its entries leave the pad on the next scan. Headless `opencode
-run` processes host no server and are never shown.
+follows its live events. No hooks, extensions, or configuration are required.
+
+**Sessions appear when they work in a window you have open, and leave when the
+window closes.** A freshly opened window shows nothing; sending a prompt makes
+its session appear — the same flow as Codex. Database history never creates
+pad rows, sessions running in other windows or processes cannot leak into a
+window's list, and idling never hides a session that already appeared. Close
+the tab and its sessions are gone within seconds. Headless `opencode run`
+processes host no server and are never shown.
 
 **Start the TUI with a port** so it hosts the server Pulsar monitors:
 `opencode --port 4096`. On OpenCode 1.19.2 a TUI started without `--port`
@@ -149,12 +155,9 @@ in the pad's top line and the PC panel, read from the session itself.
 Session permission questions, structured answers, and model choice stay in the
 OpenCode TUI: Pulsar displays the model in use but does not change it, and
 there is no voice for OpenCode entries. Up to the 12 most recently updated
-sessions per window are listed; sessions idle for more than 24 hours stay off
-the deck (busy, retrying, or approval-pending sessions always show). The
-server API exposes all recorded sessions across projects, so without this rule
-long-finished history would appear as idle agents. Discovery is local to this
-PC; remote servers are not monitored in this version. OpenCode's server API is
-experimental and versions may require changes — tested with OpenCode 1.19.2.
+sessions per window are listed. Discovery is local to this PC; remote servers
+are not monitored in this version. OpenCode's server API is experimental and
+versions may require changes — tested with OpenCode 1.19.2.
 
 ## Download and get started
 

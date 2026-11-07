@@ -195,6 +195,21 @@ directory-basename fallback, matching Codex conventions.
   confirm-then-readback contract; rows expose `Permission mode` in the menu
   while `Model & Effort` stays Codex-only.
 
+## Review fixes (round 6 — window-scoped discovery)
+
+- **Sessions exist only through window activity** — database history no longer
+  creates pad rows. A session appears when its window's event stream shows
+  work (messages, tool parts, session creation, permission asks, TUI session
+  selection) and vanishes when the containing terminal window closes, because
+  the monitored server dies with it. This removes the ghost rows: db history
+  resurrecting in new windows, `serve` instances in non-project directories
+  listing everything (`global` bucket, verified: 37 sessions), and sessions
+  from other processes (a serverless TUI shows none of its own history).
+  Verified live: a fresh TUI emits nothing at boot; events do not cross
+  instance boundaries. Session queries are additionally scoped to each
+  instance's own directory (`GET /path` + `?directory=`). The 24 h recency
+  rule was removed — activity alone decides visibility.
+
 ## Known limitations / next steps
 
 - **TUI windows must be started with `--port`** (e.g. `opencode --port 4096`):
