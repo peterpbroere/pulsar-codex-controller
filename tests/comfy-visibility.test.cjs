@@ -23,5 +23,5 @@ test('all offline connections leave an empty pad and reconnecting restores brows
 });
 test('offline ComfyUI entries cannot be attention targets and do not hide idle Codex sessions',()=>{
  const c=new Controller(),offline={...comfy('offline',false),state:'error'};
- c.update(snapshot([{...agent,state:'idle'},offline,{...comfy('online',true),state:'error'}]));assert.equal(c.rows.length,2);assert.equal(c.attention.length,1);c.key(2);assert.equal(c.selected,'online');
+ c.update(snapshot([{...agent,state:'idle'},offline,{...comfy('online',true),state:'error'}]));assert.equal(c.rows.length,2);assert.equal(c.attention.length,1);c.nextAttention();assert.equal(c.selected,'online');
 });

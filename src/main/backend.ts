@@ -4,9 +4,11 @@ import { join } from 'node:path';
 import { Snapshot } from '../shared/types';
 
 export class Backend {
+  onEvent?: (message:{event:string;voice_id?:string;method?:string;params?:Record<string,any>})=>void;
+  onDisconnect?: (error:Error)=>void;
   private child: ChildProcessWithoutNullStreams;
   private counter = 0;
-  private pending = new Map<number, {resolve: (v: Snapshot) => void; reject: (e: Error) => void; timer: NodeJS.Timeout}>();
+  private pending = new Map<number, {resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout}>();
   constructor(root: string, agentDeck: string | undefined, python: string, packagedExecutable?: string) {
     const args = packagedExecutable ? ['bridge'] : ['-u', join(root, 'python/adapter.py'), 'bridge'];
     if(agentDeck)args.push('--agent-deck',agentDeck);
@@ -15,7 +17,9 @@ export class Backend {
     this.child.stderr.on('data', b => console.error('[Agent Deck]', b.toString().trim()));
     createInterface({input: this.child.stdout}).on('line', line => {
       try {
-        const msg = JSON.parse(line), waiter = this.pending.get(msg.id);
+        const msg = JSON.parse(line);
+        if(typeof msg.event==='string'){this.onEvent?.(msg);return;}
+        const waiter = this.pending.get(msg.id);
         if (!waiter) return;
         this.pending.delete(msg.id); clearTimeout(waiter.timer);
         if (msg.error) waiter.reject(new Error(msg.error)); else waiter.resolve(msg.result);
@@ -27,12 +31,13 @@ export class Backend {
   private fail(error: Error) {
     for (const waiter of this.pending.values()) { clearTimeout(waiter.timer); waiter.reject(error); }
     this.pending.clear();
+    this.onDisconnect?.(error);
   }
-  request(method: string, params = {}): Promise<Snapshot> {
+  request<T=Snapshot>(method: string, params = {}, timeout=45000): Promise<T> {
     const id = ++this.counter;
     return new Promise((resolve, reject) => {
       if (this.child.exitCode !== null || this.child.killed) return reject(new Error('Agent Deck adapter is stopped. Restart the app.'));
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Agent action timed out. Check Codex; the action was not retried.')); }, 45000);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('Agent action timed out. Check Codex; the action was not retried.')); }, timeout);
       this.pending.set(id, {resolve, reject, timer});
       this.child.stdin.write(JSON.stringify({id, method, params}) + '\n', error => { if (error) this.fail(error); });
     });

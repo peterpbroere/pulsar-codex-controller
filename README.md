@@ -139,6 +139,7 @@ SHA256 hash with `SHA256SUMS.txt` from the same release.
 - Approve a supported pending request once, using its exact live request ID.
 - Open the selected Codex session on your PC without sending a new prompt.
 - Jump to the next agent that needs attention.
+- Start a native Codex voice turn from Key 3 and read its live transcript.
 - Inspect details, reject requests, interrupt a turn, or send a Continue prompt.
 - Change the selected session's permission preset for subsequent turns.
 - Adjust display brightness and switch status lighting on/off.
@@ -152,7 +153,8 @@ SHA256 hash with `SHA256SUMS.txt` from the same release.
 | **Press knob** | Open agent details; select an item or confirm a settings change |
 | **Key 1** | Approve the selected agent's displayed request **once** |
 | **Key 2** | Open the selected agent on PC |
-| **Key 3** | Jump to the next waiting/error agent |
+| **Key 3 tap** | Toggle a native voice turn; while a voice turn is active, end it |
+| **Key 3 hold (700 ms)** | Jump to the next waiting/error agent |
 | **+** | Open global settings; press again to return to the previous screen |
 | **×** | Back to the agent screen |
 
@@ -163,6 +165,35 @@ is available. Approval uses a normal press, without a hold or an extra dialog.
 The desktop companion mirrors the LCD and has clickable knob, key, and +/×
 controls. Closing its window leaves it running in the tray; choose **Quit** from
 the tray menu to exit. The app does not start at login automatically.
+
+### Native voice
+
+Tap **Key 3** to start or end a live, turn-taking voice conversation with the
+selected Codex session. Hold Key 3 for 700 ms to jump to the next waiting or
+error agent. The desktop companion shows the current target, microphone status,
+and live transcript as plain text. Spoken replies are off by default. Enable
+**Spoken replies** in the companion or **+ → Spoken replies** in global settings;
+the choice is saved. When enabled, replies use the PC's default audio output.
+Choose the voice in the companion's **Voice** selector or the pad's **+ → Voice
+picker**. Choices come from Codex's native voice catalog. Your selection is saved
+and applies to the next voice session; changing the voice does not change Spoken
+replies.
+Audio is sent to the native Codex service using the existing signed-in Codex
+login over the current v3/audio WebRTC path. Pulsar adds no speech model or API
+key. Microphone access follows Windows privacy controls. The microphone stops
+when the voice session disconnects or Pulsar quits; voice does not auto-resume.
+
+Native voice is experimental and depends on account and Codex service
+availability. Use the companion's Microphone selector to choose an input, or
+keep **Windows default input** selected. Device enumeration only lists inputs;
+it does not start recording. A voice session remains visible in the companion
+while you browse other agents.
+
+Microphone names load before recording and update automatically when devices
+change. The selector retains your saved input, marks disconnected inputs as
+unavailable, and keeps the last known names during a temporary discovery error.
+Device IDs persist across app restarts. If upgrading from a version that used
+temporary IDs, select your microphone once again; no voice session is needed.
 
 ### Status lighting
 

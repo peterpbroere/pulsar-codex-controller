@@ -1,5 +1,7 @@
 const $=id=>document.getElementById(id);
-let current;
+const microphoneSelector=window.MicrophoneSelector.createMicrophoneSelector();
+let current,voiceChoicesKey=null;
+const voiceNameLabel=value=>value?value.charAt(0).toLocaleUpperCase()+value.slice(1):value;
 async function perform(action){try{await action();}catch(e){$('status').textContent=e.message;}}
 function button(label,verb,enabled=true){const b=document.createElement('button');b.textContent=label;b.disabled=!enabled;b.onclick=()=>perform(()=>window.deck.action(verb));return b;}
 function animate(v){
@@ -21,6 +23,29 @@ function render(v){
  for(const r of v.snapshot.rows){const offline=r.source==='comfyui'&&!r.comfy?.connected;const b=document.createElement('button');b.className='session'+(r.id===v.selected?' selected':'');b.disabled=v.busy;const name=document.createElement('strong');name.textContent=r.label;const state=document.createElement('span');state.textContent=(r.source==='comfyui'?'COMFYUI':'CODEX')+' · '+r.reason+(offline?' · Edit connection':'');state.className=r.state;b.append(name,state);b.onclick=()=>offline?editComfy(v.comfyConnections.find(c=>'comfy:'+c.id===r.id)):perform(()=>window.deck.select(r.id));list.append(b);}
  if(!v.snapshot.rows.length){const p=document.createElement('p');p.className='empty';p.textContent='Your participating Codex sessions appear here after their first prompt. Use Connect Codex to set up session discovery.';list.append(p);}
  const r=v.snapshot.rows.find(r=>r.id===v.selected);
+ const voice=v.voice||{phase:'idle'};
+ const voiceTarget=voice.target?.label||voice.target?.id||'Codex';
+ const voiceLabels={idle:'Idle',starting:'Starting',active:'Live turn',stopping:'Ending',error:'Error'};
+ $('voice-phase').textContent=voiceLabels[voice.phase]||'Unavailable';
+ $('voice-phase').className='voice-badge '+(voice.phase||'idle');
+ $('voice-status').textContent=voice.phase==='active'?`Live turn with ${voiceTarget}`:voice.phase==='starting'?`Starting a live turn${voice.target?` with ${voiceTarget}`:''}…`:voice.phase==='stopping'?`Ending the live turn${voice.target?` with ${voiceTarget}`:''}…`:voice.phase==='error'?(voice.error||'Voice failed. You can retry when an agent is available.'):voice.target?`Ready to start a live turn with ${voiceTarget}.`:'Choose an agent and start a voice turn.';
+ $('voice-transcript').textContent=[voice.transcript?'You: '+voice.transcript:'',voice.reply?'Codex: '+voice.reply:''].filter(Boolean).join('\n\n')||'Transcript will appear here while you speak.';
+ $('spoken-replies').checked=!!v.preferences.spokenReplies;
+ const voiceChoices=Array.isArray(v.voiceChoices)?v.voiceChoices:[],savedVoice=v.preferences.voiceName||'',voiceChoicesSignature=JSON.stringify([voiceChoices,savedVoice]);
+ if(voiceChoicesSignature!==voiceChoicesKey){
+  const select=$('voice-name'),wasFocused=document.activeElement===select;
+  select.replaceChildren(new Option('Codex default',''));
+  for(const id of voiceChoices)select.append(new Option(voiceNameLabel(id),id));
+  if(savedVoice&&!voiceChoices.includes(savedVoice))select.append(new Option(`${voiceNameLabel(savedVoice)} (saved; unavailable)`,savedVoice));
+  select.value=savedVoice;voiceChoicesKey=voiceChoicesSignature;
+  if(wasFocused)select.focus({preventScroll:true});
+ }
+ const voicesError=v.snapshot?.voices_error;
+ $('voice-choice-note').textContent=[voicesError?`Voice list unavailable: ${voicesError}.`:savedVoice&&!voiceChoices.includes(savedVoice)?`Saved voice “${voiceNameLabel(savedVoice)}” is unavailable and has been kept; choose Codex default or a listed voice.`:'', 'Applies to the next voice session.'].filter(Boolean).join(' ');
+ renderMicrophoneSelector(v.preferences.voiceDevice||'');
+ $('voice-device').disabled=['starting','active','stopping'].includes(voice.phase);
+ $('key3-label').textContent=['starting','active','stopping'].includes(voice.phase)?'End voice':'Voice';
+ $('key3').title='Tap to toggle voice; hold for 700 ms to jump to next attention';
  $('name').textContent=r?.label||'No sessions yet';$('project').textContent=r?.project||'';$('reason').textContent=r?.reason||'';
  if(r?.comfy?.running){const p=r.comfy,percent=x=>x?Math.round(x.value/x.max*100)+'%':'—';$('reason').textContent=`${r.reason}\nTotal: ${percent(p.total)}\n${p.node||'Current node'}: ${percent(p.progress)}`;}
  $('model-effort').textContent=r?.comfy?`${r.comfy.running} running · ${r.comfy.pending} queued`:r?`Model: ${v.modelLabel} · Effort: ${v.effortLabel}`:'';
@@ -38,16 +63,38 @@ function render(v){
  $('review-panel').hidden=v.page!=='details'||!v.review?.review;$('review').textContent=v.review?.review||'';
  $('review-title').textContent=r?.comfy?'Generation activity':'Pending request';$('approval-actions').hidden=!!r?.comfy;
  $('approve').disabled=v.busy||!v.canApprove;$('reject').disabled=v.busy||!v.review?.actions.includes('reject');
- document.querySelectorAll('[data-key]').forEach(b=>{const key=Number(b.dataset.key);b.disabled=v.busy||(key===0&&!v.canApprove)||(key===1&&!r?.actions.includes('focus'))||(key===2&&!v.snapshot.rows.some(r=>r.state==='waiting'||r.state==='error'));});
+ document.querySelectorAll('[data-key]:not(#key3)').forEach(b=>{const key=Number(b.dataset.key);b.disabled=v.busy||(key===0&&!v.canApprove)||(key===1&&!r?.actions.includes('focus'));});
+ const voiceBusy=['starting','active','stopping'].includes(voice.phase),attention=v.snapshot.rows.some(r=>r.state==='waiting'||r.state==='error');
+ $('key3').disabled=!(voiceBusy||attention||v.canStartVoice);
  $('status').textContent=v.notice||v.device.error||(r?.comfy?(r.comfy.connected?'ComfyUI connected · '+v.inputMode:'ComfyUI offline · check its URL or start the server'):v.snapshot.error)||(v.busy?'Working…':v.snapshot.connected?'Ready · '+v.inputMode:'Waiting for participating Codex sessions');
 }
-document.querySelectorAll('[data-key]').forEach(b=>b.onclick=()=>perform(()=>window.deck.key(Number(b.dataset.key))));
+document.querySelectorAll('[data-key]:not(#key3)').forEach(b=>b.onclick=()=>perform(()=>window.deck.key(Number(b.dataset.key))));
+const key3=$('key3');let key3PointerActive=false;
+key3.addEventListener('pointerdown',e=>{if(key3.disabled)return;key3PointerActive=true;key3.setPointerCapture(e.pointerId);e.preventDefault();void perform(()=>window.deck.key3Edge('down'));});
+key3.addEventListener('pointerup',e=>{if(!key3PointerActive)return;key3PointerActive=false;e.preventDefault();void perform(()=>window.deck.key3Edge('up'));});
+key3.addEventListener('pointercancel',()=>{if(!key3PointerActive)return;key3PointerActive=false;void perform(()=>window.deck.key3Edge('cancel'));});
+key3.addEventListener('lostpointercapture',()=>{if(!key3PointerActive)return;key3PointerActive=false;void perform(()=>window.deck.key3Edge('cancel'));});
+key3.addEventListener('click',e=>{if(e.detail===0)void perform(()=>window.deck.key(2));});
 document.querySelectorAll('[data-control]').forEach(b=>b.onclick=()=>perform(()=>window.deck.control(b.dataset.control)));
 $('back').onclick=()=>perform(()=>window.deck.back());
 $('approve').onclick=()=>perform(()=>window.deck.action('approve'));
 $('reject').onclick=()=>perform(()=>window.deck.action('reject'));
-window.deck.onView(render);window.deck.view().then(render).catch(e=>$('status').textContent=e.message);
+window.deck.onView(render);window.deck.view().then(v=>{render(v);void refreshVoiceDevices('startup');}).catch(e=>$('status').textContent=e.message);
 window.deck.onAnimation(animate);
+$('voice-device').onchange=async e=>{const saved=current?.preferences?.voiceDevice||'';try{await window.deck.voiceDevice(e.target.value);}catch(error){e.target.value=saved;$('status').textContent=error.message;}};
+$('voice-name').onchange=async e=>{try{await window.deck.voiceName(e.target.value);}catch(error){e.target.value=current?.preferences?.voiceName||'';$('status').textContent=error.message;}};
+$('spoken-replies').onchange=async e=>{try{await window.deck.spokenReplies(e.target.checked);}catch(error){e.target.checked=!!current?.preferences?.spokenReplies;$('status').textContent=error.message;}};
+function renderMicrophoneSelector(savedId=''){
+ const view=microphoneSelector.view(savedId);
+ window.MicrophoneSelector.syncSelect($('voice-device'),view,document.activeElement);
+ $('voice-device-note').textContent=view.note;
+}
+function refreshVoiceDevices(reason='manual'){
+ $('refresh-voice-devices').disabled=true;
+ return microphoneSelector.refresh(()=>window.deck.voiceDevices(),reason).then(()=>renderMicrophoneSelector(current?.preferences?.voiceDevice||'')).finally(()=>{$('refresh-voice-devices').disabled=false;});
+}
+$('refresh-voice-devices').onclick=()=>{void refreshVoiceDevices('manual');};
+window.deck.onVoiceDevicesChanged(()=>{void refreshVoiceDevices('devicechange');});
 $('mascot-choice').onchange=e=>perform(()=>window.deck.mascot(e.target.value));
 $('connect-codex').onclick=()=>perform(()=>window.deck.setup());
 let editingComfyId;

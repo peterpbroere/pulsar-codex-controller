@@ -155,6 +155,12 @@ class CodexRPC:
             for future in pending.values():
                 if not future.done():
                     future.set_exception(RuntimeError(self.error or "Codex connection closed"))
+            # Keep the callback lightweight: consumers may forward this event,
+            # but must not make RPC calls from the reader thread.
+            try:
+                self.on_message({"method": "connection/closed", "params": {"error": self.error}})
+            except Exception:
+                pass
 
     def request(self, method, params, timeout=10):
         if not self.connected:

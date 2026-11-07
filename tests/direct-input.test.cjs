@@ -7,9 +7,17 @@ const report=(...pairs)=>{
 };
 test('captured vendor presses select main buttons and knob without keyboard shortcuts',()=>{
  const input=new DirectInput();
- for(const [hex,action] of [['21004c690800ff0010001468','key1'],['21004c6b0800ff0010011469','key2'],['21004c6d0800ff001002146a','key3'],['21004c7b0800ff00100d146d','press']]){
+ for(const [hex,action] of [['21004c690800ff0010001468','key1'],['21004c6b0800ff0010011469','key2'],['21004c6d0800ff001002146a','key3Down'],['21004c7b0800ff00100d146d','press']]){
   assert.deepEqual(input.update(packet(hex),1000),[action]);assert.deepEqual(input.update(packet(hex),1500),[]);
  }
+});
+test('key 3 releases are exposed exactly once and stray releases are ignored',()=>{
+ const input=new DirectInput();
+ assert.deepEqual(input.update(report(0x11,2),1000),[]);
+ assert.deepEqual(input.update(report(0x10,2),1100),['key3Down']);
+ assert.deepEqual(input.update(report(0x11,2),1400),['key3Up']);
+ assert.deepEqual(input.update(report(0x11,2),1450),[]);
+ input.reset();assert.deepEqual(input.update(report(0x11,2),1500),[]);
 });
 test('captured encoder contact releases count exactly one completed turn in each direction',()=>{
  const input=new DirectInput();

@@ -12,12 +12,14 @@ export function wrap(s:string,width:number) {
   }if(line)result.push(line);}return result;
 }
 export function displaySvg(c:Controller,mascotImage?:string,titleFrame?:TitleFrame):string {
+  const voice=(c as Controller & {voice?:{phase:'idle'|'starting'|'active'|'stopping'|'error';target?:{label:string};error?:string}}).voice;
+  const voicePhase=voice?.phase??'idle',voiceActive=voicePhase==='active'||voicePhase==='starting';
   const row=c.row,selected=c.rows.findIndex(r=>r.id===c.selected),waiting=row?.state==='waiting';
   const color=waiting?'#ffc76b':row?.state==='error'?'#ff8295':row?.state==='running'||row?.state==='queued'?'#8fbaff':row?.state==='offline'?'#8797a9':'#7ed9bd';
   const text=(x:number,y:number,s:string,fill='#edf2f7',size=11,weight=400,anchor='start')=>`<text x="${x}" y="${y}" fill="${fill}" font-size="${size}" font-weight="${weight}" text-anchor="${anchor}">${esc(s)}</text>`;
   let body='',top='',footer='';
   const heading=(label:string)=>`<svg x="9" y="20" width="222" height="24" overflow="hidden" font-family="${TITLE_FONT.family}">${text(-(titleFrame?.offset??0),17,label,'#fff',TITLE_FONT.size,TITLE_FONT.weight)}</svg>`;
-  const buttons=[['1','APPROVE',c.canApprove],['2','OPEN PC',row?.actions.includes('focus')],['3','ATTENTION',c.attention.length>0]];
+  const buttons=[['1','APPROVE',c.canApprove],['2','OPEN PC',row?.actions.includes('focus')],['3',voicePhase==='stopping'?'ENDING…':voiceActive?'END VOICE':'VOICE',voicePhase!=='idle'||c.attention.length>0||(c as Controller & {canStartVoice?:boolean}).canStartVoice===true]];
   for(let i=0;i<3;i++)footer+=`<rect x="${i*80+3}" y="114" width="74" height="18" rx="4" fill="${buttons[i][2]?'#203043':'#141f2b'}"/>`+text(i*80+8,126,String(buttons[i][0]),buttons[i][2]?'#7ed9bd':'#526275',8,600)+text(i*80+20,126,String(buttons[i][1]),buttons[i][2]?'#eef3f8':'#526275',8,600);
   if(c.page==='agent'){
     const configuration=row?.source==='comfyui'?'COMFYUI':row?`${clip(modelLabel(row,c.snapshot),20)} · ${effortLabel(row.settings?.effort)}`:'CODEX';
@@ -41,7 +43,8 @@ export function displaySvg(c:Controller,mascotImage?:string,titleFrame?:TitleFra
       body+=text(9,108,hasImage?'PRESS: latest image / details':'PRESS: details · + settings','#697f95',8);
     }else if(row){body+=heading(row.label)+`<circle cx="13" cy="49" r="3" fill="${color}"/>`+text(21,53,waiting?'NEEDS YOU':row.state==='running'?'WORKING':row.state==='error'?'ERROR':'READY',color,9,650)+text(231,53,modeLabel(row.settings),'#9cacc0',9,500,'end');
       const width=mascotImage?28:36;
-      const lines=wrap((row.review||row.detail||row.reason||'Ready for your next instruction').replace(/^Command:\s*/,''),width);
+      const voiceReply=c.voice.target?.id===row.id?c.voice.reply:'';
+      const lines=wrap((row.review||voiceReply||row.detail||row.reason||'Ready for your next instruction').replace(/^Command:\s*/,''),width);
       body+=`<svg x="9" y="58" width="${mascotImage?166:222}" height="42" overflow="hidden">`;
       if(lines.length>3)body+='<title>Preview truncated · press knob for details</title>';
       lines.slice(0,3).forEach((line,i)=>{body+=text(0,11+i*13,clip(line+(i===2&&lines.length>3?' …':''),width),waiting?'#ffe1af':'#bbc9d8',10);});
@@ -67,13 +70,13 @@ export function displaySvg(c:Controller,mascotImage?:string,titleFrame?:TitleFra
     const lines=wrap(row?.review||row?.detail||row?.reason||'',37),offset=c.scroll%Math.max(1,lines.length);
     lines.slice(offset,offset+3).forEach((line,i)=>{body+=text(9,34+i*13,clip(line,37),'#ced9e5',10);});
     const start=Math.max(0,Math.min(c.cursor-1,c.menu.length-2));
-    c.menu.slice(start,start+2).forEach((entry,i)=>{const active=start+i===c.cursor;body+=`<rect x="5" y="${75+i*17}" width="230" height="16" rx="3" fill="${active?'#263b4c':'#111c28'}"/>`+text(10,87+i*17,(active?'› ':'  ')+entry,active?'#7ed9bd':'#8b9eb3',9,500);});
-  }else if(c.page==='settings'||c.page==='global'||c.page==='model'||c.page==='effort'){
-    const global=c.page==='global',picker=c.page==='model'||c.page==='effort',options=global?c.globalMenu:picker?c.pickerLabels:[...MODES,'Back'];top=text(9,15,global?'GLOBAL SETTINGS':c.page==='model'?'MODEL · 1 / 2':c.page==='effort'?'EFFORT · 2 / 2':'PERMISSION MODE','#7ed9bd',10,650);
+    c.menu.slice(start,start+(voicePhase==='idle'?2:1)).forEach((entry,i)=>{const active=start+i===c.cursor;body+=`<rect x="5" y="${75+i*17}" width="230" height="16" rx="3" fill="${active?'#263b4c':'#111c28'}"/>`+text(10,87+i*17,(active?'› ':'  ')+entry,active?'#7ed9bd':'#8b9eb3',9,500);});
+  }else if(c.page==='settings'||c.page==='global'||c.page==='model'||c.page==='effort'||c.page==='voice'){
+    const global=c.page==='global',picker=c.page==='model'||c.page==='effort'||c.page==='voice',options=global?c.globalMenu:picker?c.pickerLabels:[...MODES,'Back'];top=text(9,15,global?'GLOBAL SETTINGS':c.page==='voice'?'VOICE · NEXT SESSION':c.page==='model'?'MODEL · 1 / 2':c.page==='effort'?'EFFORT · 2 / 2':'PERMISSION MODE','#7ed9bd',10,650);
     if(c.page==='effort')top+=text(231,15,clip(c.configurationDraft?.model.label??'',19),'#9cacc0',8,500,'end');
     const start=Math.max(0,Math.min(c.cursor-1,options.length-3));
     options.slice(start,start+3).forEach((option,i)=>{const y=29+i*23,active=start+i===c.cursor;body+=`<rect x="5" y="${y}" width="230" height="21" rx="4" fill="${active?'#263b4c':'#111c28'}"/>`+text(11,y+14,(active?'› ':'  ')+option,active?'#fff':'#90a3b8',11,active?600:400);});
-    body+=text(9,108,global?'TURN: choose · PRESS: change · + close':c.page==='model'?'TURN: choose · PRESS: next · × cancel':c.page==='effort'?'TURN: choose · PRESS: review · × model':'TURN: choose · PRESS: review · × back','#738ba2',8);footer='';
+    body+=text(9,108,global?'TURN: choose · PRESS: change · + close':c.page==='voice'?'TURN: voice · PRESS: save · × back':c.page==='model'?'TURN: choose · PRESS: next · × cancel':c.page==='effort'?'TURN: choose · PRESS: review · × model':'TURN: choose · PRESS: review · × back','#738ba2',8);footer='';
   }else{
     const q=c.confirm;
     if(q&&q.kind!=='permission'){
@@ -83,6 +86,12 @@ export function displaySvg(c:Controller,mascotImage?:string,titleFrame?:TitleFra
     body+=text(9,104,q?.kind==='model'?'PRESS KNOB: apply   ·   × effort':'PRESS KNOB: apply   ·   × cancel','#8da3b9',9);footer='';
   }
   if(c.notice||c.busy)body+=`<rect x="4" y="97" width="232" height="15" rx="3" fill="#263b4c"/>`+text(9,108,clip(c.busy?'Sending…':c.notice,39),'#ffc76b',9);
+  if(voicePhase!=='idle'){
+    const voiceColor=voicePhase==='active'?'#49d5c7':voicePhase==='error'?'#ff7185':'#ffc76b';
+    const voiceTarget=voice?.target?.label||'Codex';
+    const voiceLabel=voicePhase==='error'?`VOICE ERROR · ${voiceTarget} · ${voice.error||'Retry available'}`:voicePhase==='active'?`VOICE ACTIVE · ${voiceTarget}`:voicePhase==='starting'?`VOICE STARTING · ${voiceTarget}`:`VOICE ENDING · ${voiceTarget}`;
+    body+=`<rect x="4" y="98" width="232" height="14" rx="3" fill="#192a37" stroke="${voiceColor}" stroke-width=".5"/>`+text(9,108,clip(voiceLabel,43),voiceColor,8,650);
+  }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="135"><rect width="240" height="135" fill="#101925"/><g font-family="Segoe UI,DejaVu Sans,sans-serif">${top}<path d="M8 20H232" stroke="#233244"/>${body}${footer}</g></svg>`;
 }
 export async function rgb565(svg:string,brightness=100):Promise<Buffer>{const raw=await sharp(Buffer.from(svg)).removeAlpha().toColourspace('srgb').raw().toBuffer(),out=Buffer.alloc(64800),factor=Math.max(0.1,Math.min(1,brightness/100));for(let i=0,j=0;i<raw.length;i+=3,j+=2)out.writeUInt16LE(((Math.round(raw[i]*factor)>>3)<<11)|((Math.round(raw[i+1]*factor)>>2)<<5)|(Math.round(raw[i+2]*factor)>>3),j);return out;}

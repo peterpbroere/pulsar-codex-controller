@@ -7,15 +7,15 @@ const snapshot=(rows,connected=true)=>({rows,connected,error:''});
 const player=()=>new MascotPlayer(Object.fromEntries(['cat','owl'].map(name=>[name,Object.fromEntries(['idle','working','approval','done','error'].map(state=>[state,{images:[`${name}-${state}-0`,`${name}-${state}-1`,`${name}-${state}-2`],delayMs:[100,200,300]}]))])));
 const assets=MascotPlayer.load(require('node:path').resolve(__dirname,'..'));
 test('existing preferences get a cat by default; invalid saved values cannot choose asset paths',()=>{
- const c=new Controller();c.loadPreferences({brightness:70,lights:false});assert.deepEqual(c.preferences,{brightness:70,lights:false,mascot:'cat'});
- c.loadPreferences({mascot:'owl',brightness:Infinity,lights:'yes'});assert.deepEqual(c.preferences,{brightness:70,lights:false,mascot:'owl'});
+ const c=new Controller();c.loadPreferences({brightness:70,lights:false});assert.deepEqual(c.preferences,{brightness:70,lights:false,mascot:'cat',voiceDevice:'',spokenReplies:false,voiceName:''});
+ c.loadPreferences({mascot:'owl',brightness:Infinity,lights:'yes'});assert.deepEqual(c.preferences,{brightness:70,lights:false,mascot:'owl',voiceDevice:'',spokenReplies:false,voiceName:''});
  c.loadPreferences({mascot:'../../outside'});assert.equal(c.preferences.mascot,'owl');assert.throws(()=>c.setMascot('../../outside'));
  c.loadPreferences(null);assert.equal(c.preferences.mascot,'owl');
 });
 test('knob cycles Cat, Owl, Off and Cat without closing global settings',()=>{
  const c=new Controller();c.toggleGlobal();c.cursor=2;
  for(const next of ['owl','off','cat']){c.press();assert.equal(c.preferences.mascot,next);assert.equal(c.page,'global');}
- c.rotate(1);c.press();assert.equal(c.page,'agent');
+ c.cursor=c.globalMenu.length-1;c.press();assert.equal(c.page,'agent');
 });
 test('states map to the matching poses, with a sleeping mascot when disconnected',()=>{
  const p=player();for(const [agent,state] of [['waiting','approval'],['running','working'],['error','error'],['idle','idle']])assert.equal(p.frame('cat',row(agent),true,1000).state,state);

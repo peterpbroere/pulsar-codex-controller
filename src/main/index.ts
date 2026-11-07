@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, shell, powerMonitor } from 'electron';
 import { join, resolve } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
 import { Backend } from './backend';
@@ -12,6 +12,9 @@ import { MascotPlayer } from './mascot';
 import { ComfyMonitor, connection } from './comfyui';
 import { Snapshot } from '../shared/types';
 import { TitleScroller } from './title-scroll';
+import { PressGesture } from './device/press-gesture';
+import { VoiceAudio } from './voice-audio';
+import { VoiceSession } from './voice-session';
 
 const profileDirectory=process.env.PULSAR_STATE_DIR || (app.isPackaged ? join(app.getPath('appData'),'PulsarCodexDeck') : resolve(__dirname,'../../work/electron-profile'));
 mkdirSync(profileDirectory,{recursive:true});
@@ -35,6 +38,18 @@ async function run() {
   let readingButtons=false,lastButtonError=0,buttonReads=0;
   let quitting = false, drawing = false, polling = false, remapping = false, keysReady = false;
   let win!: BrowserWindow, tray: Tray | null = null;
+  const key3Gesture=new PressGesture(),desktopKey3Gesture=new PressGesture();
+  const audio=new VoiceAudio(root,{
+    state:(id,state)=>voice.audioState(id,state),
+    error:(id,message)=>voice.audioError(id,message),
+    devicesChanged:()=>{if(!quitting&&win&&!win.isDestroyed())win.webContents.send('voice-devices-changed');}
+  });
+  const voice=new VoiceSession(audio,(method,params)=>{
+    if(!backend)return Promise.reject(new Error('Voice is unavailable in demo mode.'));
+    return backend.request(method,params,15000);
+  },status=>{c.voice=status;publish();});
+  if(backend){backend.onEvent=event=>voice.event(event);backend.onDisconnect=()=>voice.disconnect();}
+  powerMonitor.on('suspend',()=>{void voice.stop();});
   let lastSvg = '', cachedFrame: Buffer | null = null, deviceError = '';
   const frameCache=new Map<string,Buffer>();
   const titles=new TitleScroller();
@@ -43,6 +58,7 @@ async function run() {
   const preferenceFile=join(stateDir,'preferences.json'),quitFile=join(stateDir,'quit-request');
   if(existsSync(quitFile))unlinkSync(quitFile);
   try{c.loadPreferences(JSON.parse(readFileSync(preferenceFile,'utf8')));}catch{}
+  await audio.setPlayback(c.preferences.spokenReplies);
   const comfyFile=join(stateDir,'comfyui.json');
   let codexSnapshot:Snapshot=c.snapshot;
   function syncSnapshot(){c.update({...codexSnapshot,rows:[...codexSnapshot.rows,...comfy.rows()]});}
@@ -73,12 +89,17 @@ async function run() {
     return {svg:displaySvg(c,mascot?.image,titleFrame),mascot};
   }
   function view() { return {snapshot:c.snapshot, selected:c.selected, page:c.page, cursor:c.cursor,
+    voice:c.voice,voiceChoices:c.voiceChoices,canStartVoice:!!backend&&!demo&&c.snapshot.connected&&!!c.row?.settings_token&&c.row?.source!=='comfyui'&&!c.busy,
     menu:c.menu, review:c.row, confirmation:c.confirm, busy:c.busy, notice:c.notice, preferences:c.preferences, canApprove:c.canApprove,
     device:{connected:device.connected, ready:protocol.ready && keysReady && !remapping, keysReady, error:deviceError},
     inputMode:'Direct USB', demo, comfyConnections:comfy.configs(), modelLabel:modelLabel(c.row,c.snapshot),effortLabel:effortLabel(c.row?.settings?.effort),canChooseModel:c.canChooseModel,...visual()}; }
   function publish() { if (win && !win.isDestroyed()) win.webContents.send('view', view()); }
   async function execute(intent?: Intent) {
-    if (!intent || c.busy) return;
+    if(!intent)return;
+    if(intent.method==='voice-toggle'){
+      await voice.toggle(c.row,!!backend&&!demo&&c.snapshot.connected&&!c.busy,c.preferences.voiceDevice,c.preferences.voiceName);return;
+    }
+    if(c.busy)return;
     if(intent.method==='comfy-focus'){
       const url=comfy.url(String(intent.params.id));if(url)await shell.openExternal(url);return;
     }
@@ -93,10 +114,13 @@ async function run() {
   }
   async function control(name:string){
     if(c.busy)return;
+    const previousPlayback=c.preferences.spokenReplies;
     let intent:Intent|undefined;
     if(name==='previous')c.rotate(-1);else if(name==='next')c.rotate(1);
+    else if(name==='attention')c.nextAttention();
     else if(name==='press')intent=c.press();else if(name==='plus')c.toggleGlobal();else if(name==='minus')c.cancelOrBack();
     else throw new Error('Invalid control');
+    if(previousPlayback!==c.preferences.spokenReplies)await audio.setPlayback(c.preferences.spokenReplies).catch(e=>{c.notice=String(e.message);});
     writeFileSync(preferenceFile,JSON.stringify(c.preferences)); publish(); await execute(intent);
   }
   const createWindow = () => {
@@ -109,6 +133,7 @@ async function run() {
     win.webContents.on('will-navigate', e => e.preventDefault());
     void win.loadFile(join(root,'ui/index.html'));
     win.on('close', e => { if (!quitting) { e.preventDefault(); win.hide(); } });
+    win.on('focus',()=>{win.webContents.send('voice-devices-changed');});
   };
   createWindow();
   app.on('second-instance', () => { win.show(); win.focus(); });
@@ -121,6 +146,27 @@ async function run() {
   tray.on('double-click',()=>win.show());
   ipcMain.handle('view', () => view());
   ipcMain.handle('key', (_e, index) => { if (![0,1,2].includes(index)) throw Error('Invalid key'); return key(index); });
+  function key3Event(event:'tap'|'hold') {if(event==='tap')void key(2);else {c.nextAttention();publish();}}
+  ipcMain.handle('key3-edge',(_e,action)=>{
+    if(action==='down')desktopKey3Gesture.down();
+    else if(action==='up')desktopKey3Gesture.up().forEach(key3Event);
+    else if(action==='cancel')desktopKey3Gesture.reset();
+    else throw Error('Invalid button gesture');
+  });
+  ipcMain.handle('voice-devices',()=>audio.devices());
+  ipcMain.handle('voice-name',(_e,name)=>{c.setVoiceName(name);writeFileSync(preferenceFile,JSON.stringify(c.preferences));publish();});
+  ipcMain.handle('spoken-replies',async(_e,enabled)=>{
+    if(typeof enabled!=='boolean')throw Error('Invalid spoken replies preference');
+    c.preferences.spokenReplies=enabled;
+    writeFileSync(preferenceFile,JSON.stringify(c.preferences));
+    try{await audio.setPlayback(enabled);}finally{publish();}
+  });
+  ipcMain.handle('voice-device',(_e,id)=>{
+    if(typeof id!=='string'||id.length>1024)throw Error('Invalid microphone');
+    if(id==='default')id='';
+    if(voice.running)throw Error('End the voice session before changing microphone.');
+    c.preferences.voiceDevice=id;writeFileSync(preferenceFile,JSON.stringify(c.preferences));publish();
+  });
   ipcMain.handle('select', (_e,id) => { c.select(String(id)); publish(); });
   ipcMain.handle('back', () => { if (!c.busy) c.back(); publish(); });
   ipcMain.handle('control',(_e,name)=>control(name));
@@ -188,13 +234,15 @@ async function run() {
     if(!keysReady||remapping||quitting)return;
     for(const name of directInput.update(packet)){
       console.log(`[input] direct ${name}`);
-      if(name.startsWith('key'))void key(Number(name.slice(3))-1);
+      if(name==='key3Down')key3Gesture.down();
+      else if(name==='key3Up')key3Gesture.up().forEach(key3Event);
+      else if(name.startsWith('key'))void key(Number(name.slice(3))-1);
       else void control(name);
     }
   };
   protocol.onReady = () => {
     titles.reset();
-    keysReady=false;directInput.reset();
+    keysReady=false;directInput.reset();key3Gesture.reset();
     if(!device.aux){deviceError='Direct USB input channel unavailable. Reconnect the pad.';publish();return;}
     remapping = true; publish();
     void protocol.remapPadKeys([{mod:0,key:0},{mod:0,key:0},{mod:0,key:0}])
@@ -204,18 +252,21 @@ async function run() {
       .finally(()=>{remapping=false;titles.reset(); lastSvg=''; cachedFrame=null; publish();});
   };
   device.on('connect',()=>{device.aux?.on('data',onDirectInput);publish();});
-  device.on('disconnect',()=>{directInput.reset();auxiliaryButtons.reset();keysReady=false; c.back();titles.reset(); lastSvg=''; cachedFrame=null; publish();});
+  device.on('disconnect',()=>{directInput.reset();key3Gesture.reset();auxiliaryButtons.reset();keysReady=false;void voice.stop(); c.back();titles.reset(); lastSvg=''; cachedFrame=null; publish();});
   if (!noDevice) device.start();
   const poll = async () => {
     if(existsSync(quitFile)){unlinkSync(quitFile);app.quit();return;}
     if (!backend || polling || c.busy || quitting) return;
     polling=true;
-    try { codexSnapshot=await backend.request('refresh');syncSnapshot(); }
-    catch(e) { codexSnapshot={...codexSnapshot,connected:false,error:String((e as Error).message),rows:codexSnapshot.rows.map(r=>({...r,actions:[],control_token:'-',settings:undefined,settings_token:undefined}))};syncSnapshot(); }
+    try { codexSnapshot=await backend.request('refresh');syncSnapshot();
+      if(voice.running&&(!codexSnapshot.connected||!codexSnapshot.rows.some(r=>r.session_id===voice.status.target?.sessionId)))voice.disconnect('Voice target is no longer connected.');
+    }
+    catch(e) {voice.disconnect();codexSnapshot={...codexSnapshot,connected:false,error:String((e as Error).message),rows:codexSnapshot.rows.map(r=>({...r,actions:[],control_token:'-',settings:undefined,settings_token:undefined}))};syncSnapshot(); }
     finally { polling=false; publish(); }
   };
   void poll();
   const pollTimer = setInterval(()=>{void poll();},1000);
+  const gestureTimer=setInterval(()=>{key3Gesture.tick().forEach(key3Event);desktopKey3Gesture.tick().forEach(key3Event);},25);
   if(!demo)void comfy.tick();
   const comfyTimer=setInterval(()=>{if(!demo&&!quitting)void comfy.tick();},1000);
   // Animation messages update only images, leaving buttons stable during clicks.
@@ -247,7 +298,7 @@ async function run() {
     try {
       if(await protocol.checkSettingsButton()){
         // Profile protection only. Raw bits 16/17 own the +/× actions.
-        keysReady=false;directInput.reset();
+        keysReady=false;directInput.reset();key3Gesture.reset();
         await protocol.remapPadKeys([{mod:0,key:0},{mod:0,key:0},{mod:0,key:0}]);
         await protocol.remapKnob(true);directInput.reset();keysReady=true;publish();
       }
@@ -270,7 +321,9 @@ async function run() {
     if (quitting) return;
     e.preventDefault(); quitting=true;
     clearInterval(pollTimer); clearInterval(drawTimer); clearInterval(buttonTimer);clearInterval(animationTimer);clearInterval(comfyTimer);comfy.close();
+    clearInterval(gestureTimer);key3Gesture.reset();desktopKey3Gesture.reset();
     void (async()=>{
+      await voice.stop();await audio.close();
       // Finish any in-flight LCD burst before restoring mappings.
       while(drawing || remapping || readingButtons) await new Promise(r=>setTimeout(r,20));
       await protocol.restoreKeys(); device.stop();

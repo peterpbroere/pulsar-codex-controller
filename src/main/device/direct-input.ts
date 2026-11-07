@@ -1,4 +1,4 @@
-export type DirectControl = 'key1' | 'key2' | 'key3' | 'press' | 'next' | 'previous';
+export type DirectControl = 'key1' | 'key2' | 'key3' | 'key3Down' | 'key3Up' | 'press' | 'next' | 'previous';
 const PRESS_CONTROLS = new Map<number, DirectControl>([[0,'key1'],[1,'key2'],[2,'key3'],[13,'press']]);
 
 /** XPAD's unsolicited vendor reports, captured on usage page FF11.
@@ -21,10 +21,10 @@ export class DirectInput {
       if(action){
         if(type===0x10){
           if(!this.held.has(index) && now-(this.lastPress.get(index)??-Infinity)>=100){
-            this.lastPress.set(index,now);events.push(action);
+            this.lastPress.set(index,now);events.push(action==='key3'?'key3Down':action);
           }
           this.held.add(index);
-        }else if(type===0x11)this.held.delete(index);
+        }else if(type===0x11){const wasHeld=this.held.delete(index);if(index===2&&wasHeld)events.push('key3Up');}
       }
       if(type===0x11 && (index===14||index===15) && i+3<end && packet[i+2]===0x11 && packet[i+3]===index){
         events.push(index===14?'next':'previous');i+=2;

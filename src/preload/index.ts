@@ -2,6 +2,12 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('deck', {
   view:()=>ipcRenderer.invoke('view'),
   key:(key:number)=>ipcRenderer.invoke('key',key),
+  key3Edge:(action:'down'|'up'|'cancel')=>ipcRenderer.invoke('key3-edge',action),
+  voiceDevices:()=>ipcRenderer.invoke('voice-devices'),
+  onVoiceDevicesChanged:(callback:()=>void)=>ipcRenderer.on('voice-devices-changed',()=>callback()),
+  voiceDevice:(id:string)=>ipcRenderer.invoke('voice-device',id),
+  spokenReplies:(enabled:boolean)=>ipcRenderer.invoke('spoken-replies',enabled),
+  voiceName:(id:string)=>ipcRenderer.invoke('voice-name',id),
   select:(id:string)=>ipcRenderer.invoke('select',id),
   action:(verb:string)=>ipcRenderer.invoke('action',verb),
   back:()=>ipcRenderer.invoke('back'),

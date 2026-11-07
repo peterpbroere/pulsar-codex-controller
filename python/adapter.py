@@ -5,8 +5,11 @@ import hashlib
 import json
 import logging
 from pathlib import Path
+import re
 import sys
+import threading
 import time
+from collections import deque
 
 MODES = {
     "Read-only": {"approvalPolicy": "on-request", "sandboxPolicy": {"type": "readOnly"}},
@@ -62,11 +65,77 @@ class Adapter:
         self.settings_errors = {}
         self.settings_at = 0
         self.models, self.models_error, self.models_at = [], "", 0
+        self.voices, self.voices_error, self.voices_at, self.voices_rpc = [], "", 0, None
         self.titles, self.titles_at, self.titles_rpc = {}, {}, None
+        self.voice_lock = threading.RLock()
+        self.voice = None
+        self.stopped_voice_ids = deque(maxlen=128)
+        self.voice_event_writer = None
         self.original_message = self.controls._message
         self.controls._message = self.message
 
+    def set_voice_event_writer(self, writer):
+        self.voice_event_writer = writer
+
+    def _ensure_voice_state(self):
+        # Keep lightweight Adapter.__new__ fixtures compatible with unit tests;
+        # normal instances initialize these fields in __init__.
+        if not hasattr(self, "voice_lock"):
+            self.voice_lock = threading.RLock()
+            self.voice = None
+            self.stopped_voice_ids = deque(maxlen=128)
+            self.voice_event_writer = None
+
+    def _voice_event(self, voice, method, params):
+        writer = self.voice_event_writer
+        if writer:
+            writer({"event": "voice", "voice_id": voice["id"], "method": method, "params": params})
+
+    def _finish_voice(self, voice, method, params):
+        with self.voice_lock:
+            if self.voice is not voice:
+                return
+            self.voice = None
+            self.stopped_voice_ids.append(voice["id"])
+            timer = voice.get("stop_cleanup_timer")
+            if timer:
+                timer.cancel()
+        self._voice_event(voice, method, params)
+
     def message(self, message):
+        self._ensure_voice_state()
+        method = message.get("method")
+        params = message.get("params", {})
+        realtime_methods = {
+            "thread/realtime/started", "thread/realtime/sdp", "thread/realtime/closed",
+            "thread/realtime/error", "thread/realtime/transcript/delta",
+            "thread/realtime/transcript/done", "thread/realtime/item/transcript/delta",
+        }
+        with self.voice_lock:
+            voice = self.voice
+            matching = voice is not None and (
+                method == "connection/closed" or params.get("threadId") == voice["thread_id"]
+            )
+        if matching and method in realtime_methods:
+            # Whitelist text/protocol metadata; never forward server audio payloads.
+            allowed = {
+                "thread/realtime/started": ("threadId", "version", "realtimeSessionId"),
+                "thread/realtime/sdp": ("threadId", "sdp"),
+                "thread/realtime/closed": ("threadId", "reason"),
+                "thread/realtime/error": ("threadId", "message"),
+                "thread/realtime/transcript/delta": ("threadId", "role", "delta"),
+                "thread/realtime/transcript/done": ("threadId", "role", "text"),
+                "thread/realtime/item/transcript/delta": ("threadId", "itemId", "delta"),
+            }
+            forwarded = {key: params[key] for key in allowed[method] if key in params}
+            if method == "thread/realtime/closed":
+                self._finish_voice(voice, method, forwarded)
+            else:
+                self._voice_event(voice, method, forwarded)
+        elif matching and method == "thread/closed":
+            self._finish_voice(voice, method, {"threadId": params.get("threadId")})
+        elif matching and method == "connection/closed":
+            self._finish_voice(voice, method, {"error": params.get("error", "")})
         if message.get('method') == 'thread/name/updated':
             params = message.get('params', {})
             thread = params.get('threadId')
@@ -104,8 +173,13 @@ class Adapter:
                 self.read_models()
             except Exception:
                 pass  # Surface catalog errors without disabling existing controls.
+            try:
+                self.read_voices()
+            except Exception:
+                pass  # Voice catalog errors must not disable agent controls.
         else:
             self.models, self.models_error, self.models_at = [], "Codex is disconnected", 0
+            self.voices, self.voices_error, self.voices_at, self.voices_rpc = [], "Codex is disconnected", 0, None
         if self.controls.connected and time.monotonic() >= self.settings_at:
             self.settings_at = time.monotonic() + 5
             for row in rows:
@@ -132,7 +206,8 @@ class Adapter:
         from hook_setup import diagnostics
         return {"rows": rows, "connected": self.controls.connected, "error": self.controls.error, 'diagnostics': diagnostics(),
                 "store": str(self.reader.path), "models": self.models, "models_error": self.models_error,
-                "models_token": fingerprint(self.models) if self.models and not self.models_error else None}
+                "models_token": fingerprint(self.models) if self.models and not self.models_error else None,
+                "voices": self.voices, "voices_error": self.voices_error}
 
     def read_titles(self, rows):
         present = {row['session_id'] for row in rows}
@@ -172,6 +247,10 @@ class Adapter:
             return {**self.refresh(), 'setup_message': result['message']}
         if method == "refresh":
             return self.refresh()
+        if method == "voice-start":
+            return self.start_voice(params)
+        if method == "voice-stop":
+            return self.stop_voice(params)
         if method not in {"action", "settings", "configuration"}:
             raise ValueError("Unknown operation")
         snapshot = self.refresh()
@@ -199,6 +278,92 @@ class Adapter:
         else:
             self.configure(row, params)
         return self.refresh()
+
+    def start_voice(self, params):
+        voice_id = params.get("voice_id")
+        session_id = params.get("session_id")
+        offer = params.get("sdp")
+        if (not all(isinstance(value, str) and value.strip() for value in (voice_id, session_id, offer)) or
+                len(voice_id) > 128 or len(session_id) > 128 or len(offer) > 262144 or
+                not offer.startswith("v=0") or not any(line.startswith("m=audio ") for line in offer.splitlines())):
+            raise ValueError("Voice session, selected session, and SDP offer are required")
+        with self.voice_lock:
+            if self.voice is not None:
+                raise ValueError("A voice session is already active")
+        snapshot = self.refresh()
+        row = next((item for item in snapshot["rows"] if item.get("id") == params.get("id")
+                    and item.get("session_id") == session_id), None)
+        if row is None:
+            raise ValueError("Session is no longer available")
+        voice_name = params.get("voice_name")
+        if voice_name not in (None, ""):
+            if not isinstance(voice_name, str):
+                raise ValueError("Voice choice is invalid")
+            if voice_name not in snapshot.get("voices", []):
+                raise ValueError(snapshot.get("voices_error") or "Selected voice is no longer available")
+        rpc = self.controls.rpc
+        if not self.controls.connected or session_id not in self.controls.contexts or rpc is None:
+            raise ValueError("Selected session is not loaded on the connected Codex server")
+        voice = {"id": voice_id, "thread_id": session_id, "rpc": rpc, "stopping": False}
+        with self.voice_lock:
+            if self.voice is not None:
+                raise ValueError("A voice session is already active")
+            self.voice = voice
+        try:
+            realtime_params = {
+                "threadId": session_id,
+                "version": "v3",
+                "outputModality": "audio",
+                "transport": {"type": "webrtc", "sdp": offer},
+                "flushTranscriptTailOnSessionEnd": True,
+                "voiceSessionId": voice_id,
+            }
+            if voice_name:
+                realtime_params["voice"] = voice_name
+            rpc.request("thread/realtime/start", realtime_params)
+            if not rpc.connected or self.controls.rpc is not rpc:
+                raise RuntimeError("Codex disconnected while starting voice")
+        except Exception:
+            self._finish_voice(voice, "voice/start-failed", {"threadId": session_id})
+            raise
+        return {"voice_id": voice_id}
+
+    def stop_voice(self, params):
+        voice_id = params.get("voice_id")
+        if not isinstance(voice_id, str) or not voice_id:
+            raise ValueError("Voice session ID is required")
+        with self.voice_lock:
+            voice = self.voice
+            if voice_id in self.stopped_voice_ids:
+                return {}
+            if voice is None:
+                raise ValueError("Unknown voice session")
+            if voice["id"] != voice_id:
+                raise ValueError("Voice session ID does not match the active session")
+            if voice["stopping"]:
+                return {}
+            voice["stopping"] = True
+        try:
+            if not voice["rpc"].connected or self.controls.rpc is not voice["rpc"]:
+                self._finish_voice(voice, "connection/closed", {"error": "Codex connection is no longer active"})
+                return {}
+            voice["rpc"].request("thread/realtime/stop", {"threadId": voice["thread_id"]})
+            # Keep ownership briefly after the stop response. Realtime events
+            # carry threadId but not a call ID, so this prevents late events
+            # from the old call being attributed to a new call on that thread.
+            timer = threading.Timer(0.75, self._finish_voice,
+                                   args=(voice, "voice/stopped", {"threadId": voice["thread_id"]}))
+            timer.daemon = True
+            with self.voice_lock:
+                if self.voice is voice:
+                    voice["stop_cleanup_timer"] = timer
+                    timer.start()
+            return {}
+        except Exception:
+            with self.voice_lock:
+                if self.voice is voice:
+                    voice["stopping"] = False
+            raise
 
     def read_models(self, force=False):
         if not force and time.monotonic() < self.models_at:
@@ -240,6 +405,42 @@ class Adapter:
         self.models, self.models_error, self.models_at = models, "", time.monotonic() + 60
         return models
 
+    def read_voices(self, force=False):
+        rpc = self.controls.rpc
+        if not self.controls.connected or rpc is None:
+            self.voices, self.voices_error, self.voices_at, self.voices_rpc = [], "Codex is disconnected", 0, None
+            return []
+        if self.voices_rpc is not rpc:
+            self.voices, self.voices_error, self.voices_at = [], "", 0
+            self.voices_rpc = rpc
+        now = time.monotonic()
+        if not force and now < self.voices_at:
+            if self.voices_error:
+                raise ValueError(self.voices_error)
+            return self.voices
+        try:
+            result = rpc.request("thread/realtime/listVoices", {})
+            catalog = result.get("voices") if isinstance(result, dict) else None
+            values = catalog.get("v3") if isinstance(catalog, dict) else None
+            if not isinstance(values, list):
+                raise ValueError("Codex returned a malformed v3 voice catalog")
+            voices, seen = [], set()
+            for value in values:
+                if (not isinstance(value, str) or not value or len(value) > 64 or
+                        not value.isascii() or not re.fullmatch(r"[A-Za-z0-9_.-]+", value)):
+                    continue
+                if value not in seen:
+                    seen.add(value)
+                    voices.append(value)
+            if not voices:
+                raise ValueError("Codex returned no usable v3 voices")
+        except Exception as error:
+            self.voices, self.voices_error = [], str(error) or type(error).__name__
+            self.voices_at = time.monotonic() + 30
+            raise
+        self.voices, self.voices_error, self.voices_at = voices, "", time.monotonic() + 60
+        return voices
+
     def configure(self, row, params):
         if params.get("kind") not in {"model", "effort"}:
             raise ValueError("Unknown configuration change")
@@ -278,6 +479,15 @@ class Adapter:
         return settings
 
     def close(self):
+        with self.voice_lock:
+            voice = self.voice
+        if voice and voice["rpc"].connected:
+            try:
+                voice["rpc"].request("thread/realtime/stop", {"threadId": voice["thread_id"]}, timeout=2)
+            except Exception:
+                pass
+        if voice:
+            self._finish_voice(voice, "voice/stopped", {"threadId": voice["thread_id"]})
         self.controls.close()
         self.focus.close()
 
@@ -304,6 +514,13 @@ def main():
         return
     logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
     adapter = Adapter(args.agent_deck, args.store)
+    output_lock = threading.Lock()
+
+    def write_stdout(message):
+        with output_lock:
+            print(json.dumps(message, ensure_ascii=True), flush=True)
+
+    adapter.set_voice_event_writer(write_stdout)
     try:
         for line in sys.stdin:
             message = {}
@@ -313,7 +530,7 @@ def main():
                 reply = {"id": message["id"], "result": result}
             except Exception as error:
                 reply = {"id": message.get("id"), "error": str(error)}
-            print(json.dumps(reply, ensure_ascii=True), flush=True)
+            write_stdout(reply)
     finally:
         adapter.close()
 

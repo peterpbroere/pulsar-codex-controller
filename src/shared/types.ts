@@ -15,7 +15,16 @@ export interface Row {
   source?:'comfyui'; comfy?:ComfyStatus;
 }
 export interface Snapshot {
+  voices?:string[]; voices_error?:string;
   rows: Row[]; connected: boolean; error: string; setup_message?: string;
   diagnostics?: {codex_installed: boolean; hooks_configured: boolean; pulsar_hooks: boolean};
   models?: ModelChoice[]; models_token?: string|null; models_error?: string;
+}
+export interface VoiceStatus {
+  phase:'idle'|'starting'|'active'|'stopping'|'error';
+  voiceId?:string;
+  target?:{id:string;sessionId:string;label:string};
+  error?:string;
+  transcript?:string;
+  reply?:string;
 }

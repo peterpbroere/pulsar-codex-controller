@@ -1,7 +1,7 @@
-import { Row, Snapshot, ModelChoice } from '../shared/types';
+import { Row, Snapshot, ModelChoice, VoiceStatus } from '../shared/types';
 import { isMascotChoice, MascotChoice } from './mascot';
 export const MODES = ['Read-only', 'Auto', 'No prompts', 'YOLO / Full access'];
-export type Page = 'agent' | 'details' | 'image' | 'settings' | 'model' | 'effort' | 'confirm' | 'global';
+export type Page = 'agent' | 'details' | 'image' | 'settings' | 'model' | 'effort' | 'confirm' | 'global' | 'voice';
 export interface Intent { method: string; params: Record<string, any> }
 export function effortLabel(value:unknown):string {
   if(value===null)return 'Default';
@@ -22,18 +22,23 @@ export function modeLabel(settings?: Record<string, any>): string {
   return 'Custom';
 }
 export class Controller {
+  voice:VoiceStatus={phase:'idle'};
   snapshot: Snapshot = {rows: [], connected: false, error: ''};
   selected = ''; page: Page = 'agent'; cursor = 0; scroll = 0; notice = ''; busy = false;
   confirm: ({kind:'permission';row:Row;mode:string}|{kind:'model'|'effort';row:Row;model:string;effort:string|null;label:string;catalogToken:string}) | null = null;
   displayedApproval: {id: string; session: string; token: string} | null = null;
   configurationDraft:{row:Row;model:ModelChoice;catalogToken:string}|null=null;
-  preferences = {brightness: 85, lights: true, mascot:'cat' as MascotChoice};
+  preferences = {brightness: 85, lights: true, mascot:'cat' as MascotChoice, voiceDevice:'',spokenReplies:false,voiceName:''};
+  private voiceDraftChoices:string[]=[];
   loadPreferences(value:unknown) {
     if(!value||typeof value!=='object')return;
     const p=value as Record<string,unknown>;
     if(typeof p.lights==='boolean')this.preferences.lights=p.lights;
     if(typeof p.brightness==='number'&&Number.isFinite(p.brightness))this.preferences.brightness=Math.max(25,Math.min(100,p.brightness));
     if(isMascotChoice(p.mascot))this.preferences.mascot=p.mascot;
+    if(typeof p.voiceDevice==='string'&&p.voiceDevice.length<=1024)this.preferences.voiceDevice=p.voiceDevice==='default'?'':p.voiceDevice;
+    if(typeof p.spokenReplies==='boolean')this.preferences.spokenReplies=p.spokenReplies;
+    if(typeof p.voiceName==='string'&&/^[a-z0-9_-]{0,64}$/.test(p.voiceName))this.preferences.voiceName=p.voiceName;
   }
   setMascot(value:unknown) {
     if(!isMascotChoice(value))throw new Error('Unknown mascot');
@@ -56,8 +61,15 @@ export class Controller {
   get attention() { return this.rows.filter(r => r.state === 'waiting' || r.state === 'error'); }
   get modelChoices() { return this.snapshot.models??[]; }
   get effortChoices() { return this.configurationDraft?.model.efforts??[]; }
+  get voiceChoices(){return this.snapshot.voices??[];}
+  setVoiceName(name:unknown){
+    if(typeof name!=='string'||(name!==''&&!this.voiceChoices.includes(name)))throw Error('Voice is unavailable. Choose an available voice or Codex default.');
+    this.preferences.voiceName=name;
+    this.notice='Voice saved · next session';
+  }
   get canChooseModel() { return !!this.row?.settings_token&&!!this.snapshot.models_token&&this.modelChoices.length>0; }
   get pickerLabels() {
+    if(this.page==='voice')return [...this.voiceDraftChoices.map(v=>v?v[0].toUpperCase()+v.slice(1):'Codex default'),'Back'];
     return [...(this.page==='model'?this.modelChoices.map(m=>m.label+(m.id===this.row?.settings?.model?' · current':'')):
       this.effortChoices.map(e=>effortLabel(e)+(this.configurationDraft?.model.id===this.row?.settings?.model&&e===this.row?.settings?.effort?' · current':''))),'Back'];
   }
@@ -69,6 +81,7 @@ export class Controller {
   }
   cancelOrBack() {
     if(this.busy)return;
+    if(this.page==='voice'){this.page='global';this.cursor=4;return;}
     if(this.page==='confirm'&&this.confirm?.kind==='model'&&this.configurationDraft){
       this.page='effort';this.cursor=Math.max(0,this.effortChoices.indexOf(this.confirm.effort??''));this.confirm=null;
       if(!this.effortChoices.length)this.cancelOrBack();
@@ -85,7 +98,7 @@ export class Controller {
     ...(this.row?.actions.includes('reject') ? ['Reject request'] : []),
     ...(this.row?.actions.includes('stop') ? ['Stop turn'] : []),
     ...(this.row?.actions.includes('continue') ? ['Continue'] : []), 'Global settings', 'Back']; }
-  get globalMenu() { return [`Screen brightness: ${this.preferences.brightness}%`, `Status lights: ${this.preferences.lights ? 'On' : 'Off'}`, `Mascot: ${this.preferences.mascot==='cat'?'Cat':this.preferences.mascot==='owl'?'Owl':'Off'}`, 'Close settings']; }
+  get globalMenu() { return [`Screen brightness: ${this.preferences.brightness}%`, `Status lights: ${this.preferences.lights ? 'On' : 'Off'}`, `Mascot: ${this.preferences.mascot==='cat'?'Cat':this.preferences.mascot==='owl'?'Owl':'Off'}`, `Spoken replies: ${this.preferences.spokenReplies?'On':'Off'}`, `Voice: ${this.preferences.voiceName||'Codex default'}`, 'Close settings']; }
   back() { this.page = 'agent'; this.cursor = 0; this.scroll = 0; this.confirm = null; this.configurationDraft=null;this.displayedApproval = null; }
   select(id: string) { if (this.busy) return; if (this.rows.some(r => r.id === id)) { this.selected = id; this.back(); } }
   action(verb: string, row = this.row): Intent | undefined {
@@ -102,6 +115,7 @@ export class Controller {
     return !!r && r.source!=='comfyui' && !!d && r.actions.includes('approve') && r.id === d.id && r.session_id === d.session && r.control_token === d.token;
   }
   key(key: number): Intent | undefined {
+    if(key===2)return {method:'voice-toggle',params:{}};
     if (this.busy) return;
     this.notice = '';
     if (key === 0) {
@@ -110,14 +124,15 @@ export class Controller {
       const intent = this.action('approve'); this.displayedApproval = null; return intent;
     }
     if (key === 1) return this.action('focus');
-    if (key === 2) {
+  }
+  nextAttention() {
+    if(this.busy)return;
       const rows = this.rows, start = rows.findIndex(r => r.id === this.selected);
       for (let step = 1; step <= rows.length; step++) {
         const r = rows[(start + step) % rows.length];
         if (r.state === 'waiting' || r.state === 'error') { this.select(r.id); return; }
       }
       this.notice = 'No agents need attention';
-    }
   }
   rotate(direction: number) {
     if (this.busy || !direction) return;
@@ -129,12 +144,18 @@ export class Controller {
       this.select(rows[(index + delta + rows.length) % rows.length].id);
     } else if (this.page === 'details') this.cursor = (this.cursor + delta + this.menu.length) % this.menu.length;
     else if (this.page === 'settings') this.cursor = (this.cursor + delta + MODES.length + 1) % (MODES.length + 1);
-    else if (this.page === 'model'||this.page==='effort') this.cursor=(this.cursor+delta+this.pickerLabels.length)%this.pickerLabels.length;
+    else if (this.page === 'model'||this.page==='effort'||this.page==='voice') this.cursor=(this.cursor+delta+this.pickerLabels.length)%this.pickerLabels.length;
     else if (this.page === 'global') this.cursor = (this.cursor + delta + this.globalMenu.length) % this.globalMenu.length;
   }
   press(): Intent | undefined {
     if (this.busy) return;
     this.notice = '';
+    if(this.page==='voice'){
+      if(this.cursor===this.voiceDraftChoices.length){this.page='global';this.cursor=4;return;}
+      try{this.setVoiceName(this.voiceDraftChoices[this.cursor]);this.page='global';this.cursor=4;}
+      catch(e){this.notice=String((e as Error).message);}
+      return;
+    }
     if (this.page === 'agent') { this.page = 'details'; this.cursor = 0; this.scroll = 0; }
     else if (this.page === 'details') {
       const entry = this.menu[this.cursor];
@@ -171,13 +192,17 @@ export class Controller {
       if (this.cursor === 0) this.preferences.brightness = this.preferences.brightness >= 100 ? 25 : Math.min(100,this.preferences.brightness+15);
       if (this.cursor === 1) this.preferences.lights = !this.preferences.lights;
       if (this.cursor === 2) this.setMascot(this.preferences.mascot==='cat'?'owl':this.preferences.mascot==='owl'?'off':'cat');
-      if (this.cursor === 3) this.toggleGlobal();
+      if (this.cursor === 3) this.preferences.spokenReplies=!this.preferences.spokenReplies;
+      if (this.cursor === 4) {
+        this.voiceDraftChoices=['',...this.voiceChoices];this.page='voice';
+        this.cursor=Math.max(0,this.voiceDraftChoices.indexOf(this.preferences.voiceName));
+      }else if(this.cursor===5)this.toggleGlobal();
     }
   }
   toggleGlobal() {
     if (this.busy) return;
     this.displayedApproval = null;
-    if (this.page === 'global') { this.page = this.returnPage; this.cursor = this.returnCursor; }
+    if (this.page === 'global'||this.page==='voice') { this.page = this.returnPage; this.cursor = this.returnCursor; }
     else { this.returnPage = this.page; this.returnCursor = this.cursor; this.page = 'global'; this.cursor = 0; }
   }
 }
