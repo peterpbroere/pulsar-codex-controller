@@ -150,6 +150,27 @@ are still current.
   utterance appears in its terminal. Do not claim delegated work was completed
   just because the voice assistant acknowledged it.
 
+## External APIs and evidence
+
+- Before implementing an integration, verify methods, paths, request/response
+  shapes, event envelopes, and identifiers against official schemas or source
+  for the supported version. Record the source/version used. Do not infer a
+  contract from endpoint names or assume versions share the same contract.
+- Base mock fixtures on verified schemas or sanitized real responses, not on
+  what the implementation expects. Exercise complete wire messages through the
+  production parsing and routing path; direct handler tests alone are not enough.
+- Cover each API variant claimed as supported, including initial pending state,
+  reconnects, external request resolution, and errors. Verify that UI actions
+  retain the selected session's identity through to the final API/CLI call.
+- Passing unit tests and type checks do not establish real-service compatibility.
+  Validate integrations with an isolated service when practical; clearly label
+  unavailable live checks and remaining assumptions. Do not test actions against
+  the maintainer's active sessions without authorization.
+- Before calling a feature complete, trace each promised behavior from input to
+  visible result and check failure/offline paths. In implementation summaries,
+  separate implemented behavior, verified behavior, and known gaps. Do not claim
+  compatibility or successful routing for paths that were not actually verified.
+
 ## Validation and delivery
 
 - Inspect `git status` before editing. Preserve unrelated and already-uncommitted
