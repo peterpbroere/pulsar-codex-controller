@@ -133,10 +133,22 @@ window's list, and idling never hides a session that already appeared. Close
 the tab and its sessions are gone within seconds. Headless `opencode run`
 processes host no server and are never shown.
 
-**Start the TUI with a port** so it hosts the server Pulsar monitors:
+**OpenCode 1.x: start the TUI with a port** so it hosts the server Pulsar monitors:
 `opencode --port 4096`. On OpenCode 1.19.2 a TUI started without `--port`
 binds no server and cannot be detected or attached to; use a distinct port per
 window (4096, 4097, …).
+
+**OpenCode 2.x (verified with 2.2.6):** Pulsar also supports the authenticated
+shared background service and its `/api` routes. The TUI does not accept
+`--port`; that option belongs to `serve`. Pulsar reads the running service's
+existing local `service.json`, validates its PID and version, and keeps the
+authorization header in memory. It does not change OpenCode configuration or
+require another API key. Standard per-user state and portable installations
+with a sibling `profile/state` directory are discovered automatically.
+Open TUI tabs supply idle-session visibility; active executions and pending
+permissions supply live state. Database history alone does not create entries.
+The 1.x permission-preset editor is unavailable for 2.x sessions because those
+permission schemas differ.
 
 Entries use the OpenCode session title (falling back to the project folder) and
 show the session's current model — for example `claude-sonnet-4-5 · thinking` —
@@ -158,6 +170,32 @@ there is no voice for OpenCode entries. Up to the 12 most recently updated
 sessions per window are listed. Discovery is local to this PC; remote servers
 are not monitored in this version. OpenCode's server API is experimental and
 versions may require changes — tested with OpenCode 1.19.2.
+
+#### OpenCode voice (experimental, push-to-talk)
+
+Tap **Key 3** on an OpenCode entry to start push-to-talk: speak, tap again,
+and the transcribed text is sent as your prompt. The microphone captures only
+between the two taps and is released immediately afterwards.
+
+Two voice styles are available in the PC app's **Speech services** section:
+
+- **Summaries** (default): during the turn, only brief activity narration is
+  spoken — "Working in the terminal", "Editing files", "Asking your
+  permission" — deduplicated, never raw commands. When the turn finishes, the
+  full reply is summarized to at most two spoken sentences by a local Ollama
+  model of your choice (default `gemma4:e2b-it-qat`; if Ollama is unreachable
+  a plain "Turn finished." plays instead). Reply text itself is never read
+  aloud.
+- **Full text**: every completed reply sentence is spoken as the turn streams.
+
+Set up the servers in **Speech services**: a **TTS server URL**
+(OpenAI-compatible `/v1/audio/speech`; tested with a local Chatterbox TTS
+server — pick its voice from the server's list), an **STT server URL**
+(OpenAI-compatible `/v1/audio/transcriptions`; tested with a local whisper.cpp
+server), and the **Ollama URL** used for summaries. All services are yours:
+audio goes only to those servers, and no speech models, downloads, or keys are
+bundled. The companion's listening/speaking animations and the transcript
+strip work as with Codex voice. Codex's native voice is unchanged.
 
 ## Download and get started
 
@@ -201,7 +239,7 @@ SHA256 hash with `SHA256SUMS.txt` from the same release.
 | **Press knob** | Open agent details; select an item or confirm a settings change |
 | **Key 1** | Approve the selected agent's displayed request **once** |
 | **Key 2** | Open the selected agent on PC |
-| **Key 3 tap** | Toggle a native voice turn; while a voice turn is active, end it |
+| **Key 3 tap** | Toggle a native voice turn; for OpenCode entries: push-to-talk (tap to talk, tap again to send; tap later to end) |
 | **Key 3 hold (700 ms)** | Jump to the next waiting/error agent |
 | **+** | Open global settings; press again to return to the previous screen |
 | **×** | Back to the agent screen |

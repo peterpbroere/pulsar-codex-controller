@@ -217,6 +217,42 @@ test('reject replies with reject and stop aborts the running turn',async()=>{
   }finally{monitor.close();await stub.close();}
 });
 
+test('the text listener only receives assistant reply text, never prompts or helpers',async()=>{
+  const stub=stubServer({sessions:[session('s1',{updated:Date.now()})],statuses:{}});
+  const port=await stub.listen();
+  const received=[];
+  const monitor=new OpenCodeMonitor(()=>{},()=>Date.now(),async()=>[{address:'127.0.0.1',port,pid:4242}]);
+  monitor.setTextListener((sessionID,partId,text)=>received.push([sessionID,partId,text]));
+  try{
+    await monitor.tick();
+    await stub.sseConnected;
+    stub.emit('message.updated',{info:{id:'msg_user',sessionID:'s1',role:'user'}});
+    stub.emit('message.part.updated',{part:{id:'prt_u',sessionID:'s1',messageID:'msg_user',type:'text',text:'my own prompt. spoken back?'}});
+    stub.emit('message.updated',{info:{id:'msg_title',sessionID:'s1',role:'assistant',agent:'title'}});
+    stub.emit('message.part.updated',{part:{id:'prt_t',sessionID:'s1',messageID:'msg_title',type:'text',text:'Repo contents walkthrough.'}});
+    stub.emit('message.part.updated',{part:{id:'prt_unknown',sessionID:'s1',messageID:'msg_missing',type:'text',text:'Untracked message.'}});
+    stub.emit('message.updated',{info:{id:'msg_reply',sessionID:'s1',role:'assistant',agent:'build'}});
+    stub.emit('message.part.updated',{part:{id:'prt_r',sessionID:'s1',messageID:'msg_reply',type:'text',text:'Working on it now. Almost done.'}});
+    await new Promise(r=>setTimeout(r,60));
+    assert.deepEqual(received,[['s1','prt_r','Working on it now. Almost done.']]);
+  }finally{monitor.close();await stub.close();}
+});
+
+test('prompts pin the session model instead of machine defaults',async()=>{
+  const stub=stubServer({sessions:[session('s1',{updated:Date.now(),raw:{model:{id:'z-ai/glm-5.3-flash',providerID:'openscale'}}})],statuses:{s1:{type:'idle'}}});
+  const port=await stub.listen();
+  const monitor=new OpenCodeMonitor(()=>{},()=>Date.now(),async()=>[{address:'127.0.0.1',port,pid:4242}]);
+  try{
+    await monitor.tick();
+    await monitor.sendPrompt(`oc:${port}:s1`,'say hi');
+    const prompt=stub.state.posts.find(p=>p.path==='/session/s1/prompt_async');
+    assert.deepEqual(prompt.body,{parts:[{type:'text',text:'say hi'}],model:{providerID:'openscale',modelID:'z-ai/glm-5.3-flash'}});
+    await monitor.action(`oc:${port}:s1`,'continue',`ses:s1@${port}`);
+    const cont=stub.state.posts.filter(p=>p.path==='/session/s1/prompt_async')[1];
+    assert.deepEqual(cont.body,{parts:[{type:'text',text:'Continue'}],model:{providerID:'openscale',modelID:'z-ai/glm-5.3-flash'}});
+  }finally{monitor.close();await stub.close();}
+});
+
 test('stale tokens are refused and vanished servers drop their rows',async()=>{
   const stub=stubServer({sessions:[session('s1',{updated:Date.now()})],statuses:{s1:{type:'idle'}},pending:[{id:'per_5',sessionID:'s1',permission:'bash',patterns:['x'],metadata:{}}]});
   let port=await stub.listen();

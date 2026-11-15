@@ -1,6 +1,8 @@
 'use strict';
 (() => {
   const sessions = new Map();
+  const ptt = new Map();
+  let speaking = null;
   const reply = (cmd, value, error) => window.voiceHost.reply(cmd.token, value, error);
   const release = session => {
     if (!session) return;
@@ -122,11 +124,104 @@
       throw error;
     }
   }
+  async function pttStart(cmd) {
+    const old = ptt.get(cmd.voiceId);
+    if (old) stopCapture(old);
+    if (!navigator.mediaDevices?.getUserMedia) throw Error('Microphone capture is unavailable.');
+    const audio = cmd.deviceId ? { deviceId: { exact: cmd.deviceId } } : true;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+    const s = { stream, ctx: null, node: null, chunks: [], cancelled: false, sampleRate: 16000 };
+    ptt.set(cmd.voiceId, s);
+    window.voiceHost.state(cmd.voiceId, 'active');
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      s.ctx = ctx; s.sampleRate = ctx.sampleRate;
+      const source = ctx.createMediaStreamSource(stream);
+      const node = ctx.createScriptProcessor(4096, 1, 1);
+      s.node = node;
+      node.onaudioprocess = e => {
+        if (s.cancelled) return;
+        s.chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      };
+      source.connect(node);
+      node.connect(ctx.destination);
+      return { ok: true, sampleRate: s.sampleRate };
+    } catch (error) {
+      stopCapture(s); ptt.delete(cmd.voiceId);
+      throw error;
+    }
+  }
+  function stopCapture(s) {
+    if (!s || s.cancelled) return;
+    s.cancelled = true;
+    try { s.node?.disconnect(); } catch {}
+    try { s.ctx?.close(); } catch {}
+    s.stream?.getTracks().forEach(track => track.stop());
+  }
+  function encodeWav(chunks, sampleRate) {
+    const count = chunks.reduce((a, c) => a + c.length, 0);
+    const view = new DataView(new ArrayBuffer(44 + count * 2));
+    const str = (off, text) => { for (let i = 0; i < text.length; i++) view.setUint8(off + i, text.charCodeAt(i)); };
+    str(0, 'RIFF'); view.setUint32(4, 36 + count * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+    view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true); view.setUint16(34, 16, true); str(36, 'data'); view.setUint32(40, count * 2, true);
+    let off = 44;
+    for (const chunk of chunks) for (let i = 0; i < chunk.length; i++, off += 2) {
+      const v = Math.max(-1, Math.min(1, chunk[i]));
+      view.setInt16(off, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+    }
+    const bytes = new Uint8Array(view.buffer);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  async function pttStop(cmd) {
+    const s = ptt.get(cmd.voiceId);
+    if (!s) throw Error('No push-to-talk capture is active.');
+    stopCapture(s); ptt.delete(cmd.voiceId);
+    return encodeWav(s.chunks, s.sampleRate);
+  }
+  async function speak(cmd) {
+    if (typeof cmd.audioBase64 !== 'string' || !cmd.audioBase64) throw Error('Invalid speech audio.');
+    const bin = atob(cmd.audioBase64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
+    const audio = document.createElement('audio');
+    audio.hidden = true; audio.playsInline = true; audio.src = url;
+    document.body.appendChild(audio);
+    const entry = { audio, done: null, cancelled: false };
+    const done = new Promise(resolve => { entry.done = resolve; audio.onended = () => resolve(); });
+    speaking = entry;
+    try {
+      await audio.play();
+      await done;
+    } catch (error) {
+      if (speaking === entry) speaking = null;
+      if (!entry.cancelled) throw Error('Spoken replies are enabled, but audio playback was blocked. Allow audio playback and try again.');
+      return;
+    } finally {
+      if (speaking === entry) speaking = null;
+      URL.revokeObjectURL(url); audio.remove();
+    }
+  }
+  function speakCancel(cmd) {
+    const entry = speaking;
+    if (!entry) return;
+    entry.cancelled = true;
+    try { entry.audio.pause(); } catch {}
+    entry.done?.();
+  }
   async function command(name, cmd) {
     if (!cmd || typeof cmd.token !== 'string') return;
     try {
       let value;
       if (name === 'start') value = await start(cmd);
+      else if (name === 'ptt-start') value = await pttStart(cmd);
+      else if (name === 'ptt-stop') value = await pttStop(cmd);
+      else if (name === 'speak') value = await speak(cmd);
+      else if (name === 'speak-cancel') value = await speakCancel(cmd);
       else if (name === 'answer') {
         const s = sessions.get(cmd.voiceId);
         if (!s || s.cancelled || !s.pc) throw Error('No matching microphone session.');

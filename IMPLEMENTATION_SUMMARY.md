@@ -210,6 +210,71 @@ directory-basename fallback, matching Codex conventions.
   instance's own directory (`GET /path` + `?directory=`). The 24 h recency
   rule was removed — activity alone decides visibility.
 
+## OpenCode voice (push-to-talk) — added
+
+- **Design agreed with the maintainer:** BYO speech services; Key 3 tap =
+  push-to-talk on OpenCode entries; replies spoken as streaming sentence
+  chunks; configuration via URLs + voice picker.
+- **Verified contracts before building:** the maintainer's Chatterbox TTS
+  Server 2.0.2 (`POST /v1/audio/speech` `{model,input,voice}` → WAV, voice
+  must be a real voice filename from `GET /v1/audio/voices`, verified live);
+  whisper.cpp server `POST /v1/audio/transcriptions` (OpenAI-compatible,
+  verified live with SAPI-synthesized speech, exact transcription).
+- **Implementation:** `src/main/opencode-voice.ts` (PTT state machine,
+  sentence detection on streaming text parts, ordered speech queue),
+  renderer capture/speak commands in `ui/voice.js` (WAV encode at 16 kHz,
+  blob playback), `VoiceAudio` ptt/speak host methods (same trusted-window
+  mic model), speech-services config (`speech.json` + PC UI + IPC).
+- **Boundaries:** opencode-only; Codex native voice untouched; no bundled
+  models/keys/downloads; capture only during explicit PTT, released
+  immediately; spoken replies opt-in (existing preference).
+
+## Round 7 — wrong-model incident (user-reported)
+
+- **Cause:** prompts sent without an explicit `model` (Continue, voice
+  push-to-talk, the first pad test) fell back to OpenCode's default-model
+  resolution. No default was configured anywhere, so OpenCode auto-detected
+  the local Ollama daemon and picked `ollama/qwen3-coder-next:80b` — loading
+  an 80B model into RAM (which also explains a multi-minute turn stall).
+- **Fixes:** the launcher config (`opencode-openscale.json`) now pins
+  `"model": "openscale/z-ai/glm-5.3-flash"` (user-side default for all
+  sessions started via the script); Pulsar pins the session's own model on
+  every prompt it sends (`sendPrompt` and the Continue action include
+  `model:{providerID,modelID}` from the session), with a regression test.
+
+## Round 8 — voice over-speaking (user-reported)
+
+- **Cause:** the text listener fed every text part to the speech queue —
+  including the user's own prompts, title/summary helper output, and unknown
+  messages.
+- **Fix:** the monitor tracks message roles/agents from `message.updated`
+  and only forwards **assistant reply text** (never user prompts, title or
+  summary helpers, or untracked messages); offsets are tracked per text part
+  so multi-part replies never re-speak. Regression test at the monitor level.
+
+## Round 9 — voice summaries (user feedback)
+
+- **Voice style setting** with **Summaries** as the default: during turns only
+  brief, deduplicated, categorized narration is spoken ("Working in the
+  terminal", "Asking your permission" — never raw commands or reply text);
+  at turn end the reply is summarized to ≤2 spoken sentences by a **local
+  Ollama model selectable in the app** (default `gemma4:e2b-it-qat` from the
+  maintainer's existing library, `/api/tags` picker, fallback to a plain
+  "Turn finished." when Ollama is unreachable). **Full text** (verbatim
+  sentence streaming) remains available. Speech services UI restructured to
+  match the panel's field styling.
+
+## Round 10 — premature "Turn finished." (user-reported)
+
+- **Causes:** the voice exchange ended on states that are not a finished turn —
+  a permission ask (`waiting`) and a failed poll (`offline`) both mapped to
+  "finished", producing premature summaries/fallback lines mid-turn; a single
+  status flap could also finish it.
+- **Fixes:** only idle/errored turns finish the exchange (waiting still
+  counts as running, offline is "unknown" and waits); a finish requires two
+  consecutive poll reports. Summarizer verified live against the local
+  Ollama (gemma4:e2b-it-qat, ~10 s for a clean two-sentence digest).
+
 ## Known limitations / next steps
 
 - **TUI windows must be started with `--port`** (e.g. `opencode --port 4096`):
@@ -241,3 +306,11 @@ M  src/main/voice-session.ts    OpenCode voice guard
 M  ui/app.js, ui/index.html     chips, model line, sidebar title
 A  tests/opencode.test.cjs      14 tests, stub HTTP+SSE server
 ```
+
+## OpenCode 2 discovery fix (2026-11-11, v0.1.19)
+
+- Added a separate authenticated OpenCode 2.2.6 adapter using its versioned `/api` contract. Discovery validates local service metadata against listener PID/port and `/api/info`; passwords remain in memory and are never bundled or logged.
+- Reuses standard per-user service state and portable `profile/state` layouts. Idle TUI tabs are read from local tab metadata only while a matching client process exists; live execution is read from `/api/session/active`.
+- Parent routing preserves exact request IDs; 2.x replies use `decision`, stopping uses `interrupt`, and prompts use the native `text` payload. Legacy 1.x integration is retained. Unsupported 2.x permission-preset editing is omitted. Raw 2.x message deltas are not forwarded as spoken replies.
+- Verified read-only discovery of the actual running 2.2.6 session while idle. Approval/rejection, interrupt, and prompt routes were tested against isolated fixtures, not executed against live user work. Added discovery, wire-contract, and parent-routing regression tests.
+- A 1.x TUI without an exposed listening port still requires reopening with an explicit `--port`; the 2.x TUI instead uses its shared background service.

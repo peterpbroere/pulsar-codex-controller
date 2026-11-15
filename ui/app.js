@@ -43,6 +43,10 @@ function render(v){
  const voicesError=v.snapshot?.voices_error;
  $('voice-choice-note').textContent=[voicesError?`Voice list unavailable: ${voicesError}.`:savedVoice&&!voiceChoices.includes(savedVoice)?`Saved voice “${voiceNameLabel(savedVoice)}” is unavailable and has been kept; choose Codex default or a listed voice.`:'', 'Applies to the next voice session.'].filter(Boolean).join(' ');
  renderMicrophoneSelector(v.preferences.voiceDevice||'');
+ const speechCfg=v.speechCfg||{ttsUrl:'',ttsVoice:'',sttUrl:'',ollamaUrl:'',summarizerModel:'',voiceStyle:'summaries'};
+ let speechDirty=window.__speechDirty===true;
+ for(const [id,value] of [['speech-tts-url',speechCfg.ttsUrl],['speech-stt-url',speechCfg.sttUrl],['speech-ollama-url',speechCfg.ollamaUrl]]){const input=$(id);if(!speechDirty&&document.activeElement!==input)input.value=value;}
+ for(const [id,value] of [['speech-tts-voice',speechCfg.ttsVoice],['speech-summarizer',speechCfg.summarizerModel],['speech-style',speechCfg.voiceStyle||'summaries']]){const sel=$(id);if(!speechDirty&&document.activeElement!==sel)sel.value=value;}
  $('voice-device').disabled=['starting','active','stopping'].includes(voice.phase);
  $('key3-label').textContent=['starting','active','stopping'].includes(voice.phase)?'End voice':'Voice';
  $('key3').title='Tap to toggle voice; hold for 700 ms to jump to next attention';
@@ -96,6 +100,33 @@ function refreshVoiceDevices(reason='manual'){
 $('refresh-voice-devices').onclick=()=>{void refreshVoiceDevices('manual');};
 window.deck.onVoiceDevicesChanged(()=>{void refreshVoiceDevices('devicechange');});
 $('mascot-choice').onchange=e=>perform(()=>window.deck.mascot(e.target.value));
+$('speech-save').onclick=async()=>{
+ try{await window.deck.speechSave({ttsUrl:$('speech-tts-url').value.trim(),ttsVoice:$('speech-tts-voice').value,sttUrl:$('speech-stt-url').value.trim(),ollamaUrl:$('speech-ollama-url').value.trim(),summarizerModel:$('speech-summarizer').value,voiceStyle:$('speech-style').value});$('speech-note').textContent='Saved. Speech services apply immediately.';window.__speechDirty=false;void refreshSpeechVoices();void refreshSpeechModels();}
+ catch(e){$('speech-note').textContent=e.message;}
+};
+for(const id of ['speech-tts-url','speech-tts-voice','speech-stt-url','speech-ollama-url','speech-summarizer','speech-style'])$(id).addEventListener('input',()=>{window.__speechDirty=true;});
+async function refreshSpeechModels(){
+ const sel=$('speech-summarizer');
+ try{
+  const list=await window.deck.speechModels();
+  sel.replaceChildren(new Option('Default (gemma4:e2b-it-qat)',''));
+  for(const m of list)sel.append(new Option(m,m));
+  sel.value=current?.speechCfg?.summarizerModel||'';
+  $('speech-note').textContent=list.length?`${list.length} Ollama models available for summaries.`:'No local Ollama models found; summaries will fall back to "Turn finished."';
+ }catch(e){$('speech-note').textContent='Could not load Ollama models: '+e.message;}
+}
+$('speech-refresh-models').onclick=()=>{void refreshSpeechModels();};
+async function refreshSpeechVoices(){
+ const sel=$('speech-tts-voice');
+ try{
+  const list=await window.deck.speechVoices();
+  sel.replaceChildren(new Option('Default voice',''));
+  for(const v of list)sel.append(new Option(String(v).replace(/\.(wav|mp3)$/i,''),v));
+  sel.value=current?.speechCfg?.ttsVoice||'';
+  $('speech-note').textContent=list.length?`${list.length} voices available on the TTS server.`:'No voice list from the TTS server; the default voice will be used.';
+ }catch(e){$('speech-note').textContent='Could not load voices: '+e.message;}
+}
+$('speech-refresh-voices').onclick=()=>{void refreshSpeechVoices();};
 $('connect-codex').onclick=()=>perform(()=>window.deck.setup());
 let editingComfyId;
 function editComfy(config){editingComfyId=config?.id;$('comfy-title').textContent=config?'Edit ComfyUI connection':'Add ComfyUI connection';$('comfy-name').value=config?.name||'';$('comfy-url').value=config?.url||'';$('comfy-result').textContent='';$('delete-comfy').hidden=!config;$('comfy-dialog').showModal();$('comfy-name').focus();}

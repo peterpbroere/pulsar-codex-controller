@@ -4,7 +4,7 @@ const channel = 'pulsar-voice-audio';
 type Command = { token: string; [key: string]: any };
 contextBridge.exposeInMainWorld('voiceHost', {
   listen(handler: (name: string, payload: Command) => void) {
-    for (const name of ['start', 'answer', 'stop', 'devices', 'playback']) {
+    for (const name of ['start', 'answer', 'stop', 'devices', 'playback', 'ptt-start', 'ptt-stop', 'speak', 'speak-cancel']) {
       ipcRenderer.on(`${channel}:${name}`, (_event, payload) => handler(name, payload));
     }
   },

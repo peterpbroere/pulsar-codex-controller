@@ -149,6 +149,11 @@ are still current.
 - Native voice can delegate work to the coding agent; not every conversational
   utterance appears in its terminal. Do not claim delegated work was completed
   just because the voice assistant acknowledged it.
+- OpenCode voice is push-to-talk through user-configured speech services (BYO
+  OpenAI-compatible STT and TTS server URLs; verified against a local
+  Chatterbox TTS server and whisper.cpp). Keep Codex's native voice untouched;
+  no bundled speech models or keys. Capture only during explicit push-to-talk,
+  release immediately on stop/error/end, and keep spoken replies opt-in.
 
 ## External APIs and evidence
 

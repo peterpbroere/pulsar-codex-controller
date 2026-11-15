@@ -107,6 +107,50 @@ export class VoiceAudio {
     }
   }
 
+  async pttStart(voiceId: string, deviceId?: string): Promise<unknown> {
+    this.checkId(voiceId);
+    if (deviceId !== undefined && (typeof deviceId !== 'string' || deviceId.length > 512)) throw Error('Invalid microphone device.');
+    if (this.closed) throw Error('Microphone audio host is closed.');
+    if (this.voiceId) await this.stop(this.voiceId);
+    const operation = ++this.operation;
+    this.voiceId = voiceId;
+    this.allowedVoiceId = undefined;
+    this.callbacks.state(voiceId, 'connecting');
+    let win: WindowLike | undefined;
+    try {
+      win = await this.waitForOperation(operation, this.ensureWindow());
+      if (this.operation !== operation || this.voiceId !== voiceId || this.closed) throw Error('Microphone start was cancelled.');
+      this.allowedVoiceId = voiceId;
+      this.startDispatchedVoiceId = voiceId;
+      const result = await this.invoke<unknown>(win, 'ptt-start', { voiceId, deviceId });
+      if (this.operation !== operation || this.voiceId !== voiceId || this.closed) throw Error('Microphone start was cancelled.');
+      if (!result || (result as any).ok !== true) throw Error('Microphone capture did not start.');
+      return result;
+    } catch (error) {
+      if (this.operation === operation && this.voiceId === voiceId) {
+        await this.stop(voiceId);
+        this.callbacks.error(voiceId, this.message(error));
+      }
+      throw error;
+    }
+  }
+  async pttStop(voiceId: string): Promise<string> {
+    this.checkId(voiceId);
+    if (voiceId !== this.voiceId || !this.win || this.win.isDestroyed()) throw Error('No push-to-talk capture is active.');
+    const result = await this.invoke<string>(this.win, 'ptt-stop', { voiceId });
+    if (typeof result !== 'string' || !result.length || result.length > 64 * 1024 * 1024) throw Error('Microphone capture returned invalid audio.');
+    return result;
+  }
+  async speak(voiceId: string, audioBase64: string): Promise<void> {
+    this.checkId(voiceId);
+    if (voiceId !== this.voiceId || !this.win || this.win.isDestroyed()) throw Error('No voice session is active.');
+    if (typeof audioBase64 !== 'string' || !audioBase64.length || audioBase64.length > 96 * 1024 * 1024) throw Error('Invalid speech audio.');
+    await this.invoke<void>(this.win, 'speak', { voiceId, audioBase64 });
+  }
+  async speakCancel(voiceId: string): Promise<void> {
+    if (voiceId !== this.voiceId || !this.win || this.win.isDestroyed()) return;
+    await this.invoke<void>(this.win, 'speak-cancel', { voiceId }).catch(() => {});
+  }
   async stop(voiceId?: string): Promise<void> {
     if (voiceId !== undefined) this.checkId(voiceId);
     if (voiceId && voiceId !== this.voiceId) return;
@@ -217,7 +261,7 @@ export class VoiceAudio {
   private validSender(event: IpcEvent) { return !!this.win && !this.win.isDestroyed() && event.sender.id === this.senderId && this.isTrustedUrl(event.sender.getURL()); }
   private invoke<T>(win: WindowLike, command: string, payload: unknown): Promise<T> {
     const token = randomUUID();
-    const timeout = setTimeout(() => { const p = this.pending.get(token); if (p) { this.pending.delete(token); p.reject(Error('Microphone operation timed out.')); } }, command === 'start' ? 120000 : 15000);
+    const timeout = setTimeout(() => { const p = this.pending.get(token); if (p) { this.pending.delete(token); p.reject(Error('Microphone operation timed out.')); } }, command === 'start' || command === 'ptt-start' || command === 'speak' ? 120000 : 15000);
     return new Promise<T>((resolve, reject) => {
       this.pending.set(token, { windowId: win.webContents.id, resolve: value => { clearTimeout(timeout); resolve(value); }, reject: error => { clearTimeout(timeout); reject(error); } });
       this.send(win, command, { ...payload as object, token });

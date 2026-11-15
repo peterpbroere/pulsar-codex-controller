@@ -1,10 +1,12 @@
 import { execFile, spawn } from 'node:child_process';
 import { basename } from 'node:path';
 import { OpenCodeStatus, Row } from '../shared/types';
+import { ModernOpenCodeMonitor } from './opencode2';
+import { discoverModernConnection, ModernConnection } from './opencode2-discovery';
 
 const HEALTH_TIMEOUT=4000, POLL_TIMEOUT=6000, SESSION_LIMIT=12, RESCAN_MS=10000, POLL_MS=2000, RETRY_MS=2000, ERROR_KEEP_MS=120000;
 
-export interface Listener { address:string; port:number; pid:number }
+export interface Listener { address:string; port:number; pid:number; executablePath?:string; hasClient?:boolean }
 export function parseListeners(output:string, pids:Set<number>):Listener[] {
   const found=new Map<string,Listener>();
   for(const line of output.split(/\r?\n/)){
@@ -91,6 +93,7 @@ function childOrArchived(value:any):boolean {
 interface ServerState {
   url:string; port:number; pid:number; version:string; directory:string; connected:boolean; failed:boolean; errorMessage:string;
   sessions:Map<string,SessionState>; statuses:Map<string,any>; pending:Map<string,Pending>; seen:Set<string>;
+  roles:Map<string,{role:string;agent?:string}>;
   errors:Map<string,{message:string;at:number}>; activity:Map<string,string>;
   abort:AbortController; busy:boolean; nextPoll:number; streaming:boolean; sseRetry:number;
 }
@@ -113,18 +116,42 @@ function exec(command:string,args:string[]):Promise<string> {
 }
 async function discoverListeners():Promise<Listener[]> {
   const [tasks,netstat]=await Promise.all([
-    exec('tasklist',['/FI','IMAGENAME eq opencode.exe','/FO','CSV','/NH']),
+    exec('powershell.exe',['-NoProfile','-NonInteractive','-Command', "@(Get-CimInstance Win32_Process -Filter \"Name='opencode.exe'\" | Select-Object ProcessId,ExecutablePath) | ConvertTo-Json -Compress"]),
     exec('netstat',['-ano']),
   ]);
-  const pids=new Set<number>();
-  for(const m of tasks.matchAll(/"opencode\.exe",\s*"(\d+)"/gi))pids.add(Number(m[1]));
-  return parseListeners(netstat,pids);
+  const parsed=JSON.parse(tasks||'[]'), processes=Array.isArray(parsed)?parsed:[parsed];
+  const pids=new Set<number>(processes.map(p=>Number(p.ProcessId)));
+  return parseListeners(netstat,pids).map(listener=>{
+    const executablePath=processes.find(p=>Number(p.ProcessId)===listener.pid)?.ExecutablePath;
+    const hasClient=typeof executablePath==='string'&&processes.some(p=>Number(p.ProcessId)!==listener.pid&&p.ExecutablePath?.toLowerCase()===executablePath.toLowerCase());
+    return {...listener,executablePath,hasClient};
+  });
 }
 export class OpenCodeMonitor {
   private servers=new Map<number,ServerState>();
+  private modern=new Map<number,{connection:ModernConnection;monitor:ModernOpenCodeMonitor}>();
   private stopped=false;
   private nextScan=0;
-  constructor(private changed:()=>void=()=>{},private now:()=>number=Date.now,private discover:()=>Promise<Listener[]>=discoverListeners){}
+  private textListener?:(sessionID:string,partId:string,text:string)=>void;
+  private activityListener?:(sessionID:string,kind:'tool'|'ask'|'error',detail?:string)=>void;
+  constructor(private changed:()=>void=()=>{},private now:()=>number=Date.now,private discover:()=>Promise<Listener[]>=discoverListeners,
+    private discoverModern:typeof discoverModernConnection=discoverModernConnection){}
+  setTextListener(fn:(sessionID:string,partId:string,text:string)=>void):void { this.textListener=fn;for(const entry of this.modern.values())entry.monitor.setTextListener(fn); }
+  setActivityListener(fn:(sessionID:string,kind:'tool'|'ask'|'error',detail?:string)=>void):void { this.activityListener=fn;for(const entry of this.modern.values())entry.monitor.setActivityListener(fn); }
+  async sendPrompt(rowId:string,text:string):Promise<void> {
+    const match=/^oc:(\d+):(.+)$/.exec(rowId);
+    if(!match)throw Error('Unknown OpenCode entry.');
+    const port=Number(match[1]),sessionID=match[2],server=this.servers.get(port);
+    const modern=this.modern.get(port);if(modern)return modern.monitor.sendPrompt(rowId,text);
+    if(!server)throw Error('That OpenCode server is no longer running.');
+    const session=server.sessions.get(sessionID);
+    if(!session)throw Error('That OpenCode session is gone.');
+    // Always pin the session's own model: an unpinned prompt would fall back to
+    // whatever default the machine resolves (e.g. an auto-detected local Ollama model).
+    const model=session.model?{providerID:session.model.providerID,modelID:session.model.id}:undefined;
+    await post(server.url,`session/${encodeURIComponent(sessionID)}/prompt_async`,{parts:[{type:'text',text}],...(model?{model}:{})});
+    this.changed();
+  }
   rows():Row[] {
     const out:Row[]=[];
     for(const server of [...this.servers.values()].sort((a,b)=>a.port-b.port)){
@@ -135,7 +162,7 @@ export class OpenCodeMonitor {
         .sort((a,b)=>b.updated-a.updated).slice(0,SESSION_LIMIT);
       for(const session of sessions)out.push(this.rowFor(server,session));
     }
-    return this.dedupe(out);
+    return this.dedupe([...out,...[...this.modern.values()].flatMap(entry=>entry.monitor.rows())]);
   }
   // Every instance lists the shared database, so one session can appear on
   // several servers. Prefer the instance that actually holds its live state.
@@ -191,6 +218,7 @@ export class OpenCodeMonitor {
       await this.rescan();
     }
     await Promise.all([...this.servers.values()].map(server=>this.poll(server)));
+    await Promise.all([...this.modern.values()].map(entry=>entry.monitor.tick()));
     for(const server of this.servers.values())void this.stream(server);
   }
   private async rescan():Promise<void> {
@@ -199,6 +227,9 @@ export class OpenCodeMonitor {
     const live=new Set<number>();
     for(const listener of listeners){
       live.add(listener.port);
+      const modern=this.modern.get(listener.port);
+      if(modern&&modern.connection.pid===listener.pid){modern.connection.hasClient=listener.hasClient;continue;}
+      if(modern){modern.monitor.close();this.modern.delete(listener.port);}
       if(this.servers.has(listener.port))continue;
       const url=`http://${listener.address}:${listener.port}`;
       try{
@@ -211,12 +242,22 @@ export class OpenCodeMonitor {
           if(typeof path?.directory==='string')server.directory=path.directory;
         }catch{}
       }catch{}
+      if(!this.servers.has(listener.port)&&listener.executablePath){
+        const connection=await this.discoverModern(listener,listener.executablePath,listener.hasClient===true);
+        if(connection&&!this.stopped){
+          const monitor=new ModernOpenCodeMonitor(connection,this.changed,this.now);
+          if(this.textListener)monitor.setTextListener(this.textListener);
+          if(this.activityListener)monitor.setActivityListener(this.activityListener);
+          this.modern.set(listener.port,{connection,monitor});
+        }
+      }
     }
     for(const [port,server] of this.servers)if(!live.has(port)){server.abort.abort();this.servers.delete(port);}
+    for(const [port,entry] of this.modern)if(!live.has(port)){entry.monitor.close();this.modern.delete(port);}
   }
   private blankServer(url:string,port:number,pid:number,version:string):ServerState {
     return {url,port,pid,version,directory:'',connected:false,failed:false,errorMessage:'',sessions:new Map(),statuses:new Map(),
-      pending:new Map(),seen:new Set(),errors:new Map(),activity:new Map(),abort:new AbortController(),busy:false,nextPoll:0,streaming:false,sseRetry:0};
+      pending:new Map(),seen:new Set(),roles:new Map(),errors:new Map(),activity:new Map(),abort:new AbortController(),busy:false,nextPoll:0,streaming:false,sseRetry:0};
   }  private async poll(server:ServerState):Promise<void> {
     if(this.stopped||server.busy||this.now()<server.nextPoll)return;
     server.busy=true;
@@ -336,7 +377,7 @@ export class OpenCodeMonitor {
     }
     else if(type==='permission.asked'||type==='permission.v2.asked'){
       const pending=normalizePending(properties);
-      if(pending){server.pending.set(pending.id,pending);server.seen.add(pending.sessionID);}
+      if(pending){server.pending.set(pending.id,pending);server.seen.add(pending.sessionID);this.activityListener?.(pending.sessionID,'ask');}
     }
     else if(type==='permission.replied'||type==='permission.v2.replied'){
       const id=typeof properties.id==='string'?properties.id:typeof properties.requestID==='string'?properties.requestID:'';
@@ -349,19 +390,31 @@ export class OpenCodeMonitor {
         const message=typeof raw==='string'?raw:typeof raw?.message==='string'?raw.message:'Error reported';
         server.errors.set(sessionID,{message,at:this.now()});
         server.activity.delete(sessionID);
+        this.activityListener?.(sessionID,'error');
       }
     }
     else if(type==='message.part.updated'||type==='message.part.delta'||type==='message.updated'){
       const part=properties.part;
+      if(type==='message.updated'&&properties.info&&typeof properties.info.id==='string'){
+        const info=properties.info;
+        server.roles.set(info.id,{role:String(info.role??''),agent:typeof info.agent==='string'?info.agent:undefined});
+        if(server.roles.size>400){const oldest=server.roles.keys().next().value;if(oldest)server.roles.delete(oldest);}
+      }
       const sessionID=type==='message.updated'
         ?(typeof properties.info?.sessionID==='string'?properties.info.sessionID:typeof properties.sessionID==='string'?properties.sessionID:'')
         :(typeof part?.sessionID==='string'?part.sessionID:typeof properties.sessionID==='string'?properties.sessionID:'');
       if(!sessionID)return;
       server.seen.add(sessionID);
       server.errors.delete(sessionID);
+      if(type==='message.part.updated'&&this.textListener&&part?.type==='text'&&typeof part.text==='string'){
+        // Only the assistant's actual reply text is spoken: never the user's own
+        // prompts, never title/summary helper output, never unknown-role messages.
+        const meta=typeof part.messageID==='string'?server.roles.get(part.messageID):undefined;
+        if(meta?.role==='assistant'&&meta.agent!=='title'&&meta.agent!=='summary')this.textListener(sessionID,part.id,part.text);
+      }
       if(type==='message.part.updated'){
         const tool=typeof part?.tool==='string'?part.tool:typeof part?.state?.title==='string'?part.state.title:'';
-        if(part?.type==='tool'&&tool)server.activity.set(sessionID,`Tool: ${tool.slice(0,40)}`);
+        if(part?.type==='tool'&&tool){server.activity.set(sessionID,`Tool: ${tool.slice(0,40)}`);this.activityListener?.(sessionID,'tool',tool);}
       }
     }
     else if(type==='session.created'){
@@ -378,6 +431,7 @@ export class OpenCodeMonitor {
     const match=/^oc:(\d+):(.+)$/.exec(rowId);
     if(!match)throw Error('Unknown OpenCode entry.');
     const port=Number(match[1]),sessionID=match[2],server=this.servers.get(port);
+    const modern=this.modern.get(port);if(modern)return modern.monitor.action(rowId,verb,token);
     if(!server)throw Error('That OpenCode server is no longer running.');
     if(verb==='focus'){
       const {file,args}=attachArgs(server.url,sessionID);
@@ -402,7 +456,8 @@ export class OpenCodeMonitor {
     }
     if(verb==='stop'){await post(server.url,`session/${encodeURIComponent(sessionID)}/abort`,{});this.changed();return;}
     if(verb==='continue'){
-      await post(server.url,`session/${encodeURIComponent(sessionID)}/prompt_async`,{parts:[{type:'text',text:'Continue'}]});
+      const model=session.model?{providerID:session.model.providerID,modelID:session.model.id}:undefined;
+      await post(server.url,`session/${encodeURIComponent(sessionID)}/prompt_async`,{parts:[{type:'text',text:'Continue'}],...(model?{model}:{})});
       this.changed();return;
     }
     throw Error('Unsupported action.');
@@ -426,6 +481,7 @@ export class OpenCodeMonitor {
   }
   close():void {
     this.stopped=true;
+    for(const entry of this.modern.values())entry.monitor.close();this.modern.clear();
     for(const server of this.servers.values())server.abort.abort();
     this.servers.clear();
   }

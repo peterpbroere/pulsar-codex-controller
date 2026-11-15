@@ -11,6 +11,7 @@ import { DirectInput } from './device/direct-input';
 import { MascotPlayer } from './mascot';
 import { ComfyMonitor, connection } from './comfyui';
 import { OpenCodeMonitor } from './opencode';
+import { OpenCodeVoice, validateSpeechConfig, SpeechConfig } from './opencode-voice';
 import { Snapshot } from '../shared/types';
 import { TitleScroller } from './title-scroll';
 import { PressGesture } from './device/press-gesture';
@@ -41,8 +42,8 @@ async function run() {
   let win!: BrowserWindow, tray: Tray | null = null;
   const key3Gesture=new PressGesture(),desktopKey3Gesture=new PressGesture();
   const audio=new VoiceAudio(root,{
-    state:(id,state)=>voice.audioState(id,state),
-    error:(id,message)=>voice.audioError(id,message),
+    state:(id,state)=>opencodeVoice.handles(id)?opencodeVoice.audioState(id,state):voice.audioState(id,state),
+    error:(id,message)=>opencodeVoice.handles(id)?opencodeVoice.audioError(id,message):voice.audioError(id,message),
     devicesChanged:()=>{if(!quitting&&win&&!win.isDestroyed())win.webContents.send('voice-devices-changed');}
   });
   const voice=new VoiceSession(audio,(method,params)=>{
@@ -61,8 +62,20 @@ async function run() {
   try{c.loadPreferences(JSON.parse(readFileSync(preferenceFile,'utf8')));}catch{}
   await audio.setPlayback(c.preferences.spokenReplies);
   const comfyFile=join(stateDir,'comfyui.json');
+  const speechFile=join(stateDir,'speech.json');
+  let speechCfg:SpeechConfig={ttsUrl:'',ttsVoice:'',sttUrl:'',ollamaUrl:'http://127.0.0.1:11434',summarizerModel:'gemma4:e2b-it-qat',voiceStyle:'summaries'};
+  try{speechCfg=validateSpeechConfig(JSON.parse(readFileSync(speechFile,'utf8')));}catch{}
   let codexSnapshot:Snapshot=c.snapshot;
   const opencode=new OpenCodeMonitor(()=>{syncSnapshot();publish();});
+  const opencodeVoice=new OpenCodeVoice({
+    audio,
+    changed:status=>{c.voice=status;publish();},
+    send:(rowId,text)=>opencode.sendPrompt(rowId,text),
+    now:()=>Date.now(),
+  });
+  opencode.setTextListener((sessionID,partId,text)=>opencodeVoice.observeText(sessionID,partId,text));
+  opencode.setActivityListener((sessionID,kind,detail)=>opencodeVoice.announce(sessionID,kind,detail??''));
+  opencodeVoice.configure(speechCfg,c.preferences.spokenReplies);
   function syncSnapshot(){c.update({...codexSnapshot,rows:[...codexSnapshot.rows,...comfy.rows(),...opencode.rows()]});}
   const comfy=new ComfyMonitor(()=>{syncSnapshot();publish();});
   try{
@@ -92,7 +105,7 @@ async function run() {
     return {svg:displaySvg(c,mascot?.image,titleFrame),mascot};
   }
   function view() { return {snapshot:c.snapshot, selected:c.selected, page:c.page, cursor:c.cursor,
-    voice:c.voice,voiceChoices:c.voiceChoices,canStartVoice:!!backend&&!demo&&c.snapshot.connected&&!!c.row?.settings_token&&c.row?.source!=='comfyui'&&c.row?.source!=='opencode'&&!c.busy,
+    voice:c.voice,voiceChoices:c.voiceChoices,speechCfg,canStartVoice:!!backend&&!demo&&(c.row?.source==='opencode'?!!speechCfg.sttUrl:c.snapshot.connected&&!!c.row?.settings_token)&&c.row?.source!=='comfyui'&&!c.busy,
     menu:c.menu, review:c.row, confirmation:c.confirm, busy:c.busy, notice:c.notice, preferences:c.preferences, canApprove:c.canApprove,
     device:{connected:device.connected, ready:protocol.ready && keysReady && !remapping, keysReady, error:deviceError},
     inputMode:'Direct USB', demo, comfyConnections:comfy.configs(), modelLabel:modelLabel(c.row,c.snapshot),effortLabel:effortLabel(c.row?.settings?.effort),canChooseModel:c.canChooseModel,...visual()}; }
@@ -100,6 +113,10 @@ async function run() {
   async function execute(intent?: Intent) {
     if(!intent)return;
     if(intent.method==='voice-toggle'){
+      if(c.row?.source==='opencode'){
+        if(demo){c.notice='Voice is unavailable in demo mode.';return;}
+        await opencodeVoice.toggle(c.row,c.preferences.voiceDevice);return;
+      }
       await voice.toggle(c.row,!!backend&&!demo&&c.snapshot.connected&&!c.busy,c.preferences.voiceDevice,c.preferences.voiceName);return;
     }
     if(c.busy)return;
@@ -141,7 +158,7 @@ async function run() {
     else if(name==='attention')c.nextAttention();
     else if(name==='press')intent=c.press();else if(name==='plus')c.toggleGlobal();else if(name==='minus')c.cancelOrBack();
     else throw new Error('Invalid control');
-    if(previousPlayback!==c.preferences.spokenReplies)await audio.setPlayback(c.preferences.spokenReplies).catch(e=>{c.notice=String(e.message);});
+    if(previousPlayback!==c.preferences.spokenReplies){await audio.setPlayback(c.preferences.spokenReplies).catch(e=>{c.notice=String(e.message);});opencodeVoice.configure(speechCfg,c.preferences.spokenReplies);}
     writeFileSync(preferenceFile,JSON.stringify(c.preferences)); publish(); await execute(intent);
   }
   const createWindow = () => {
@@ -180,13 +197,43 @@ async function run() {
     if(typeof enabled!=='boolean')throw Error('Invalid spoken replies preference');
     c.preferences.spokenReplies=enabled;
     writeFileSync(preferenceFile,JSON.stringify(c.preferences));
+    opencodeVoice.configure(speechCfg,enabled);
     try{await audio.setPlayback(enabled);}finally{publish();}
   });
   ipcMain.handle('voice-device',(_e,id)=>{
     if(typeof id!=='string'||id.length>1024)throw Error('Invalid microphone');
     if(id==='default')id='';
     if(voice.running)throw Error('End the voice session before changing microphone.');
+    if(opencodeVoice.busy)throw Error('End the push-to-talk session before changing microphone.');
     c.preferences.voiceDevice=id;writeFileSync(preferenceFile,JSON.stringify(c.preferences));publish();
+  });
+  let speechVoices:string[]=[];
+  ipcMain.handle('speech-save',(_e,value)=>{
+    if(demo||c.busy)throw Error('Speech settings cannot be changed right now.');
+    const cfg=validateSpeechConfig(value);
+    writeFileSync(speechFile,JSON.stringify(cfg,null,2));
+    speechCfg=cfg;speechVoices=[];
+    opencodeVoice.configure(speechCfg,c.preferences.spokenReplies);
+    publish();
+  });
+  ipcMain.handle('speech-voices',async()=>{
+    if(!speechCfg.ttsUrl)return [];
+    if(!speechVoices.length){
+      const response=await fetch(speechCfg.ttsUrl+'/v1/audio/voices',{signal:AbortSignal.timeout(8000)});
+      if(!response.ok)throw Error(`HTTP ${response.status} from the speech service.`);
+      const value=await response.json() as any;
+      const list=Array.isArray(value?.voices)?value.voices:Array.isArray(value)?value:[];
+      speechVoices=list.filter((v:any)=>typeof v==='string'&&v).slice(0,100);
+    }
+    return [...speechVoices];
+  });
+  ipcMain.handle('speech-models',async()=>{
+    const base=speechCfg.ollamaUrl||'http://127.0.0.1:11434';
+    const response=await fetch(base+'/api/tags',{signal:AbortSignal.timeout(8000)});
+    if(!response.ok)throw Error(`HTTP ${response.status} from Ollama.`);
+    const value=await response.json() as any;
+    const list=Array.isArray(value?.models)?value.models:[];
+    return list.map((m:any)=>typeof m?.name==='string'?m.name:'').filter((n:string)=>n).slice(0,100);
   });
   ipcMain.handle('select', (_e,id) => { c.select(String(id)); publish(); });
   ipcMain.handle('back', () => { if (!c.busy) c.back(); publish(); });
@@ -281,6 +328,12 @@ async function run() {
     polling=true;
     try { codexSnapshot=await backend.request('refresh');syncSnapshot();
       if(voice.running&&(!codexSnapshot.connected||!codexSnapshot.rows.some(r=>r.session_id===voice.status.target?.sessionId)))voice.disconnect('Voice target is no longer connected.');
+      if(opencodeVoice.busy){
+        const target=opencode.rows().find(r=>r.session_id===opencodeVoice.targetSessionId);
+        // Only a genuinely idle/errored turn finishes the voice exchange: waiting
+        // (permission ask) is still running, and offline is unknown, not finished.
+        opencodeVoice.turnUpdate(target?(target.state==='running'||target.state==='waiting'?'running':target.state==='offline'?'unknown':'finished'):'gone');
+      }
     }
     catch(e) {voice.disconnect();codexSnapshot={...codexSnapshot,connected:false,error:String((e as Error).message),rows:codexSnapshot.rows.map(r=>({...r,actions:[],control_token:'-',settings:undefined,settings_token:undefined}))};syncSnapshot(); }
     finally { polling=false; publish(); }
@@ -347,6 +400,7 @@ async function run() {
     clearInterval(opencodeTimer);opencode.close();
     clearInterval(gestureTimer);key3Gesture.reset();desktopKey3Gesture.reset();
     void (async()=>{
+      opencodeVoice.close();
       await voice.stop();await audio.close();
       // Finish any in-flight LCD burst before restoring mappings.
       while(drawing || remapping || readingButtons) await new Promise(r=>setTimeout(r,20));
