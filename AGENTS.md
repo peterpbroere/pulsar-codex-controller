@@ -9,6 +9,10 @@ maintainer.** Record durable decisions, not guesses, temporary troubleshooting
 steps, or every suggestion in a conversation. Revise superseded guidance rather
 than accumulating contradictory rules.
 
+## Language
+
+- Always respond in English, regardless of the language of the user's request.
+
 ## Working with the maintainer
 
 - Explain the intended change briefly before implementing it. Be explicit about

@@ -165,8 +165,11 @@ export class ModernOpenCodeMonitor {
       }
       // The v2 CLI's root TUI accepts the server and session directly. Open a
       // visible shell so the TUI remains interactive; no secret appears in args.
-      const command=`start "Pulsar OpenCode" cmd.exe /k ""${s.connection.executablePath}" --server ${s.connection.url} --session ${sessionID}"`;
-      spawn('cmd.exe',['/d','/s','/c',command],{detached:true,stdio:'ignore',windowsHide:false,env}).unref();return;
+      // Tokens stay separate argv elements — a concatenated command with
+      // embedded quotes makes cmd's /s stripping produce a broken
+      // "Pulsar OpenCode" title that Windows treats as a missing executable.
+      spawn('cmd.exe',['/d','/s','/c','start','Pulsar OpenCode','cmd.exe','/k',s.connection.executablePath,'--server',s.connection.url,'--session',sessionID],
+        {detached:true,stdio:'ignore',windowsHide:false,env}).unref();return;
     }
     if(verb==='approve'||verb==='reject'){
       const p=[...s.pending.values()].find(x=>x.sessionID===sessionID&&x.id===token);if(!p)throw Error('No pending request. It may have been resolved already.');

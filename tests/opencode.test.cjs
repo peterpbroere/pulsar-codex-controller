@@ -71,8 +71,13 @@ test('netstat listeners are parsed for opencode pids only',()=>{
 });
 
 test('attach command targets the server URL and continues the shown session',()=>{
+  // Every token must be its own argv element: one concatenated string with
+  // embedded quotes makes cmd's /s stripping turn the window title into
+  // "Pulsar OpenCode" and Windows reports it as a missing executable.
   assert.deepEqual(attachArgs('http://127.0.0.1:4096','ses_ab12'),
-    {file:'cmd.exe',args:['/c','start','Pulsar OpenCode','cmd','/k','opencode','attach','http://127.0.0.1:4096','--session','ses_ab12']});
+    {file:'cmd.exe',args:['/d','/s','/c','start','Pulsar OpenCode','cmd.exe','/k','opencode','attach','http://127.0.0.1:4096','--session','ses_ab12']});
+  for(const arg of attachArgs('http://127.0.0.1:4096','ses_ab12').args)
+    assert.ok(!arg.includes('"'),`no argv element may contain quotes: ${arg}`);
 });
 
 test('model label, pending previews, and normalization are defensive',()=>{

@@ -112,6 +112,10 @@ class Controls:
         self.nonce = secrets.token_hex(16)
         self.next_poll = 0
         self.error = ""
+        # Sessions the shared Codex server reported as loaded on the last
+        # successful sync; used to prune journal rows it no longer knows.
+        self.last_loaded = set()
+        self.loaded_at = 0.0
 
     @property
     def connected(self):
@@ -378,6 +382,11 @@ class Controls:
                 cursor = page.get("nextCursor")
                 if not cursor:
                     break
+            # The shared app-server outlives sessions, so owner liveness cannot
+            # detect a closed session. Everything it no longer has loaded is
+            # gone; remember that so journal ghosts never come back.
+            self.last_loaded = loaded
+            self.loaded_at = time.monotonic()
             with self.lock:
                 removed = set(self.contexts) - (wanted & loaded)
                 for thread in removed:

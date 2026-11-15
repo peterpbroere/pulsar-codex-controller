@@ -150,6 +150,32 @@ permissions supply live state. Database history alone does not create entries.
 The 1.x permission-preset editor is unavailable for 2.x sessions because those
 permission schemas differ.
 
+**Conditions for an OpenCode session to appear on the deck:**
+
+1. **A monitored server must be running.** 1.x: a TUI started with
+   `--port <n>` (a distinct port per window). 2.x: the shared background
+   service — starting a plain `opencode2` window is enough. Headless
+   `opencode run` processes host no monitorable server and never appear.
+2. **The instance must be discoverable.** 1.x: the process must own a
+   loopback listener. 2.x: its `service.json` (one record per state
+   directory) must match the listening PID. Multiple 2.x instances sharing
+   one state directory overwrite each other's record — only the newest
+   starting one is found; give each its own `XDG_STATE_HOME` or a
+   `profile/state` directory next to its executable.
+3. **The session must be live, not history.** It counts as live when it is
+   currently executing or waiting for permission, when it produced an event
+   (message, tool part, session creation, TUI selection) since the deck
+   connected, or — on 2.x — when it is open in a TUI tab. Archived sessions
+   and subagent/child sessions are always excluded.
+4. **An entry disappears when its window/server closes** (within one
+   ~10-second rescan) or, on 2.x, when the session is closed in every TUI
+   tab. Idling never hides a session that already appeared; closing the last
+   tab does.
+
+A stale 2.x `tabs.json` (OpenCode sometimes leaves a closed tab listed) can
+keep a closed session visible until OpenCode rewrites the file or the
+session is archived.
+
 Entries use the OpenCode session title (falling back to the project folder) and
 show the session's current model — for example `claude-sonnet-4-5 · thinking` —
 in the pad's top line and the PC panel, read from the session itself.
@@ -157,8 +183,9 @@ in the pad's top line and the PC panel, read from the session itself.
 - **Key 1** approves the shown permission request once, using its exact
   request ID; **× → Reject request** refuses it. Requests resolved elsewhere
   are refused as stale.
-- **Key 2** opens a terminal running `opencode attach` against that server, so
-  you can watch and steer the same session from a TUI.
+- **Key 2** opens a terminal attached to that server (1.x: `opencode attach`,
+  2.x: the root TUI with `--server`/`--session`), so you can watch and steer
+  the same session from a TUI.
 - The knob menu offers **Stop turn** (abort) while the agent works and
   **Continue** to send a Continue prompt when it is idle.
 - Errors and automatic retries turn the entry red; a pending permission request

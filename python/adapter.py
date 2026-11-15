@@ -11,6 +11,11 @@ import threading
 import time
 from collections import deque
 
+# A loaded-thread list older than this is considered stale: without a fresh
+# list we must not prune, or an offline Codex server would hide everything.
+LOADED_FRESH_SECONDS = 30
+
+
 MODES = {
     "Read-only": {"approvalPolicy": "on-request", "sandboxPolicy": {"type": "readOnly"}},
     "Auto": {"approvalPolicy": "on-request", "sandboxPolicy": {"type": "workspaceWrite", "networkAccess": False}},
@@ -166,6 +171,14 @@ class Adapter:
         rows = self.deck.view(limit=None)
         self.controls.sync(rows)
         self.controls.decorate(rows)
+        # The shared Codex app-server outlives sessions, so owner-liveness
+        # cannot detect closure: a closed session's row would survive forever.
+        # The server's own loaded-thread list is authoritative — drop rows for
+        # threads it no longer has loaded (only when a fresh list is known).
+        loaded = self.controls.last_loaded
+        if loaded and time.monotonic() - self.controls.loaded_at < LOADED_FRESH_SECONDS:
+            rows = [row for row in rows
+                    if row.get("owner_kind") != "shared" or row["session_id"] in loaded]
         self.read_titles(rows)
         label_sessions(rows, self.titles)
         if self.controls.connected:

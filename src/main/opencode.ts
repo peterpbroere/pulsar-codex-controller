@@ -20,7 +20,11 @@ export function parseListeners(output:string, pids:Set<number>):Listener[] {
   return [...found.values()];
 }
 export function attachArgs(url:string,sessionID:string):{file:string;args:string[]} {
-  return {file:'cmd.exe',args:['/c','start','Pulsar OpenCode','cmd','/k','opencode','attach',url,'--session',sessionID]};
+  // Every token is a separate argv element: node quotes each one itself. A
+  // single concatenated command string makes cmd's /s stripping turn the
+  // window title into \"Pulsar OpenCode\" and Windows reports it as a
+  // missing executable.
+  return {file:'cmd.exe',args:['/d','/s','/c','start','Pulsar OpenCode','cmd.exe','/k','opencode','attach',url,'--session',sessionID]};
 }
 export function openCodeModelLabel(status?:OpenCodeStatus):string {
   if(!status?.model)return 'OPENCODE';
